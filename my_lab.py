@@ -92,6 +92,7 @@ def extract_board(a):
 @app.route("/mass_erase", methods=["POST"])
 def mass_erase():
     adapters = request.json.get("adapters", [])
+    results = []
 
     for a in adapters:
         try:
@@ -99,19 +100,22 @@ def mass_erase():
                 cmd = [COMMANDER_PATH, "device", "masserase", "--serialno", a["serialNumber"]]
             else:
                 cmd = [COMMANDER_PATH, "device", "masserase", "--ip", a["host"]]
-
             subprocess.run(cmd, check=True)
+            results.append({"serialNumber": a["serialNumber"], "ok": True})
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] mass_erase {a.get('serialNumber')}: exit {e.returncode}")
+            results.append({"serialNumber": a["serialNumber"], "ok": False})
         except Exception as e:
             print(f"[ERROR] mass_erase unexpected: {e}")
+            results.append({"serialNumber": a["serialNumber"], "ok": False})
 
-    return "OK"
+    return jsonify(results)
 
 
 @app.route("/fw_upgrade", methods=["POST"])
 def fw_upgrade():
     adapters = request.json.get("adapters", [])
+    results = []
 
     for a in adapters:
         try:
@@ -119,14 +123,16 @@ def fw_upgrade():
                 cmd = [COMMANDER_PATH, "adapter", "fwupgrade", "-s", a["serialNumber"]]
             else:
                 cmd = [COMMANDER_PATH, "adapter", "fwupgrade", "--ip", a["host"]]
-
             subprocess.run(cmd, check=True)
+            results.append({"serialNumber": a["serialNumber"], "ok": True})
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] fw_upgrade {a.get('serialNumber')}: exit {e.returncode}")
+            results.append({"serialNumber": a["serialNumber"], "ok": False})
         except Exception as e:
             print(f"[ERROR] fw_upgrade unexpected: {e}")
+            results.append({"serialNumber": a["serialNumber"], "ok": False})
 
-    return "OK"
+    return jsonify(results)
 
 # ----------------------------
 # UI

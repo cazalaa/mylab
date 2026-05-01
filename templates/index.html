@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -22,8 +21,9 @@ body {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 24px;
+    gap: 16px;
 }
-.topbar-left { display: flex; align-items: baseline; gap: 10px; }
+.topbar-left { display: flex; align-items: baseline; gap: 10px; flex-shrink: 0; }
 .app-title { font-size: 18px; font-weight: 500; letter-spacing: -.3px; }
 .count-badge {
     font-family: 'IBM Plex Mono', monospace;
@@ -33,7 +33,38 @@ body {
     padding: 2px 8px;
     border-radius: 20px;
 }
-.topbar-actions { display: flex; gap: 8px; align-items: center; }
+.topbar-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+
+/* ── progress bar ── */
+.progress-wrap {
+    flex: 1;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.progress-wrap.visible { display: flex; }
+.progress-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+}
+.progress-track {
+    height: 6px;
+    background: #e0dfd9;
+    border-radius: 99px;
+    overflow: hidden;
+}
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 99px;
+    background: #1a1a1a;
+    transition: width .3s ease, background .3s;
+}
+.progress-bar.done-ok  { background: #1D9E75; }
+.progress-bar.done-err { background: #E24B4A; }
 
 /* ── buttons ── */
 button {
@@ -54,10 +85,12 @@ button {
 }
 button:hover { background: #ece9e3; border-color: #b0afa9; }
 button:active { transform: scale(.97); }
+button:disabled { opacity: .45; pointer-events: none; }
 button.icon-only { width: 34px; padding: 0; justify-content: center; font-size: 14px; }
 button.primary { background: #1a1a1a; color: #f4f3f0; border-color: #1a1a1a; }
 button.primary:hover { background: #333; }
 button.success { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
+button.error   { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 
 /* ── grid ── */
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -86,31 +119,7 @@ button.success { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
 }
 .panel-body { padding: 10px; min-height: 120px; }
 
-/* ── board cards ── */
-
-.board-serial-line {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-}
-.board-nickname {
-    font-size: 11px;
-    color: #1D9E75;
-    font-weight: 500;
-}
-                                  
-.board-label {
-    font-size: 11px;
-    color: #555;
-    margin-top: 1px;
-}
-.board-host {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    color: #185FA5;
-    margin-top: 1px;
-}
-                                                                                                      
+/* ── board cards (available) ── */
 .board-card {
     border: 1px solid #e0dfd9;
     border-radius: 10px;
@@ -126,14 +135,17 @@ button.success { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
 .board-card:hover { border-color: #aaa; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
 .board-card:last-child { margin-bottom: 0; }
 .board-info { display: flex; flex-direction: column; gap: 2px; }
+.board-serial-line { display: flex; align-items: baseline; gap: 4px; }
 .board-serial {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     font-weight: 500;
     color: #1a1a1a;
 }
-.board-id { font-size: 11px; color: #888; }
-.board-right { display: flex; align-items: center; gap: 8px; }
+.board-nickname { font-size: 11px; color: #1D9E75; font-weight: 500; }
+.board-label    { font-size: 11px; color: #555; margin-top: 1px; }
+.board-right    { display: flex; align-items: center; gap: 8px; }
+
 .pill {
     font-size: 10px;
     font-weight: 500;
@@ -156,14 +168,19 @@ button.success { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
     align-items: center;
     justify-content: space-between;
     background: #fff;
+    position: relative;
+    transition: opacity .2s;
 }
 .sel-card:last-child { margin-bottom: 0; }
+.sel-card.running { opacity: .5; pointer-events: none; }
+
 .sel-serial {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     color: #1a1a1a;
 }
 .sel-id { font-size: 11px; color: #888; margin-top: 2px; }
+
 .remove-btn {
     width: 22px; height: 22px; padding: 0; border-radius: 6px;
     border: 1px solid #e0dfd9; background: #faf9f7;
@@ -172,6 +189,28 @@ button.success { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
     transition: background .15s, color .15s;
 }
 .remove-btn:hover { background: #FCEBEB; color: #A32D2D; border-color: #F09595; }
+
+/* ── card status ── */
+.card-status {
+    font-size: 13px;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.card-status.spinning::after {
+    content: "";
+    width: 14px; height: 14px;
+    border: 2px solid #ddd;
+    border-top-color: #555;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: block;
+}
+.card-status.ok  { background: #EAF3DE; color: #3B6D11; }
+.card-status.err { background: #FCEBEB; color: #A32D2D; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── drop zone ── */
 .drop-hint {
@@ -192,9 +231,18 @@ button.success { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
         <span class="app-title">My Lab</span>
         <span class="count-badge" id="count">0 adapters</span>
     </div>
+
+    <!-- barre de progression (cachée par défaut) -->
+    <div class="progress-wrap" id="progressWrap">
+        <span class="progress-label" id="progressLabel"></span>
+        <div class="progress-track">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+    </div>
+
     <div class="topbar-actions">
         <button class="icon-only" id="refreshBtn" onclick="refresh()" title="Refresh" data-icon="↺">↺</button>
-        <button onclick="addAll()">All</button>
+        <button id="allBtn" onclick="addAll()">All</button>
         <button id="eraseBtn" onclick="massErase()" data-icon="Erase">Erase</button>
         <button id="fwBtn" onclick="upgradeFW()" class="primary" data-icon="↑ FW">↑ FW</button>
     </div>
@@ -222,25 +270,49 @@ button.success { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
 let selected = new Set();
 let cache = [];
 
-async function runWithFeedback(btn, label, action) {
+// ── progress ──────────────────────────────────────
+function showProgress(label, done, total) {
+    const wrap = document.getElementById("progressWrap");
+    const lbl  = document.getElementById("progressLabel");
+    const bar  = document.getElementById("progressBar");
+    wrap.classList.add("visible");
+    bar.classList.remove("done-ok", "done-err");
+    lbl.innerText = `${label}  ${done} / ${total} adapters`;
+    bar.style.width = total > 0 ? `${Math.round(done / total * 100)}%` : "0%";
+}
+
+function finishProgress(allOk) {
+    const bar = document.getElementById("progressBar");
+    bar.classList.add(allOk ? "done-ok" : "done-err");
+    setTimeout(() => {
+        document.getElementById("progressWrap").classList.remove("visible");
+        bar.classList.remove("done-ok", "done-err");
+        bar.style.width = "0%";
+    }, 3500);
+}
+
+// ── lock buttons during action ────────────────────
+function setButtonsLocked(locked) {
+    ["refreshBtn", "allBtn", "eraseBtn", "fwBtn"].forEach(id => {
+        document.getElementById(id).disabled = locked;
+    });
+}
+
+// ── refresh ───────────────────────────────────────
+async function refresh() {
+    const btn = document.getElementById("refreshBtn");
     const icon = btn.dataset.icon;
     btn.innerText = "…";
     btn.classList.remove("success");
-    await action();
+    await fetch('/scan', { method: 'POST' });
+    await new Promise(r => setTimeout(r, 1500));
+    await load();
     btn.innerText = "✓";
     btn.classList.add("success");
     setTimeout(() => { btn.classList.remove("success"); btn.innerText = icon; }, 3000);
 }
 
-async function refresh() {
-    const btn = document.getElementById("refreshBtn");
-    await runWithFeedback(btn, "↺", async () => {
-        await fetch('/scan', { method: 'POST' });
-        await new Promise(r => setTimeout(r, 1500));
-        await load();
-    });
-}
-
+// ── load adapters ─────────────────────────────────
 async function load() {
     const res = await fetch('/adapters');
     cache = await res.json();
@@ -263,12 +335,11 @@ async function load() {
         card.ondragstart = e => e.dataTransfer.setData("t", JSON.stringify(a));
         card.onclick = () => addBoard(a);
 
-        const typeClass = a.connectivityType === "usb" ? "pill-usb" : "pill-ip";
-
         const isIP = a.connectivityType !== "usb";
-        const hostLine = isIP && a.host ? `<span class="board-host">${a.host}</span>` : "";
         const nicknameSpan = a.nickname ? `<span class="board-nickname"> — ${a.nickname}</span>` : "";
         const secondLine = [a.boardLabel, a.label].filter(Boolean).join(" · ");
+        const typeLabel = isIP && a.host ? a.host : (a.connectivityType || "?");
+        const typeClass = isIP ? "pill-ip" : "pill-usb";
 
         card.innerHTML = `
             <div class="board-info">
@@ -277,16 +348,16 @@ async function load() {
                     ${nicknameSpan}
                 </div>
                 <span class="board-label">${secondLine}</span>
-                ${hostLine}
             </div>
             <div class="board-right">
-                <span class="pill ${typeClass}">${a.connectivityType || "?"}</span>
+                <span class="pill ${typeClass}">${typeLabel}</span>
                 ${selected.has(a.serialNumber) ? '<span class="star-icon">★</span>' : ''}
             </div>`;
         list.appendChild(card);
     });
 }
 
+// ── selected panel ────────────────────────────────
 function renderSelected() {
     const container = document.getElementById("selected");
     const hint = document.getElementById("dropHint");
@@ -299,17 +370,22 @@ function renderSelected() {
     hint.style.display = "none";
 
     cache.filter(a => selected.has(a.serialNumber)).forEach(a => {
+        const isIP = a.connectivityType !== "usb";
+        const secondLine = [a.boardLabel, a.label].filter(Boolean).join(" · ");
+        const hostSuffix = isIP && a.host ? ` — ${a.host}` : "";
+
         const card = document.createElement("div");
         card.className = "sel-card";
-        const secondLine = [a.boardLabel, a.label].filter(Boolean).join(" · ");
-        const hostSuffix = a.host && a.connectivityType !== "usb" ? ` — ${a.host}` : "";
-
+        card.dataset.serial = a.serialNumber;
         card.innerHTML = `
             <div>
                 <div class="sel-serial">${a.serialNumber}${a.nickname ? ` — ${a.nickname}` : ""}</div>
                 <div class="sel-id">${secondLine}${hostSuffix}</div>
             </div>
-            <button class="remove-btn" title="Remove">✕</button>`;
+            <div style="display:flex;align-items:center;gap:8px">
+                <span class="card-status" id="status-${a.serialNumber}"></span>
+                <button class="remove-btn" title="Remove">✕</button>
+            </div>`;
         card.querySelector(".remove-btn").onclick = () => {
             selected.delete(a.serialNumber);
             renderSelected();
@@ -319,6 +395,61 @@ function renderSelected() {
     });
 }
 
+// ── card status ───────────────────────────────────
+function setCardStatus(serial, state) {
+    const el = document.getElementById(`status-${serial}`);
+    if (!el) return;
+    el.className = `card-status ${state}`;
+    el.innerText = state === "ok" ? "✓" : state === "err" ? "✕" : "";
+    const card = el.closest(".sel-card");
+    if (card) card.classList.toggle("running", state === "spinning");
+}
+
+// ── generic action runner ─────────────────────────
+async function runAction(btnId, icon, endpoint, label) {
+    const btn = document.getElementById(btnId);
+    const list = cache.filter(a => selected.has(a.serialNumber));
+    const total = list.length;
+    if (total === 0) return;
+
+    btn.innerText = "…";
+    btn.classList.remove("success", "error");
+    setButtonsLocked(true);
+    list.forEach(a => setCardStatus(a.serialNumber, "spinning"));
+    showProgress(label, 0, total);
+
+    const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adapters: list })
+    });
+    const results = await res.json();
+
+    // Anime le compteur dans l'ordre des résultats
+    for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        setCardStatus(r.serialNumber, r.ok ? "ok" : "err");
+        showProgress(label, i + 1, total);
+        await new Promise(r => setTimeout(r, 120));
+    }
+
+    const allOk = results.every(r => r.ok);
+    btn.innerText = allOk ? "✓" : "✕";
+    btn.classList.add(allOk ? "success" : "error");
+    setButtonsLocked(false);
+    finishProgress(allOk);
+
+    setTimeout(() => {
+        btn.classList.remove("success", "error");
+        btn.innerText = icon;
+        results.forEach(r => setCardStatus(r.serialNumber, ""));
+    }, 4000);
+}
+
+async function massErase()  { await runAction("eraseBtn", "Erase", "/mass_erase", "Erasing"); }
+async function upgradeFW()  { await runAction("fwBtn", "↑ FW", "/fw_upgrade", "Upgrading FW"); }
+
+// ── selection ─────────────────────────────────────
 function addBoard(a) {
     if (selected.has(a.serialNumber)) return;
     selected.add(a.serialNumber);
@@ -331,30 +462,6 @@ function addAll() { cache.forEach(addBoard); }
 function onDrop(e) {
     const a = JSON.parse(e.dataTransfer.getData("t"));
     addBoard(a);
-}
-
-async function massErase() {
-    const btn = document.getElementById("eraseBtn");
-    await runWithFeedback(btn, "Erase", async () => {
-        const list = cache.filter(a => selected.has(a.serialNumber));
-        await fetch("/mass_erase", {
-            method: "POST",
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ adapters: list })
-        });
-    });
-}
-
-async function upgradeFW() {
-    const btn = document.getElementById("fwBtn");
-    await runWithFeedback(btn, "↑ FW", async () => {
-        const list = cache.filter(a => selected.has(a.serialNumber));
-        await fetch("/fw_upgrade", {
-            method: "POST",
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ adapters: list })
-        });
-    });
 }
 
 window.onload = () => load();
