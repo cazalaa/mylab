@@ -4,6 +4,17 @@ import requests
 import configparser
 import os
 from flask import Flask, jsonify, render_template, request 
+import json
+import glob
+import webview
+import threading
+
+GROUPS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Dimensions
+WIN_W          = 800
+WIN_COLLAPSED  = 82    # hauteur barre compacte
+WIN_EXPANDED   = 700   # hauteur dépliée
 
 from binresolve import resolve_sdm, resolve_commander
 
@@ -141,8 +152,32 @@ def fw_upgrade():
 def index():
     return render_template("index.html")
 
+@app.route("/groups", methods=["GET"])
+def list_groups():
+    files = glob.glob(os.path.join(GROUPS_DIR, "*.group"))
+    return jsonify([os.path.splitext(os.path.basename(f))[0] for f in sorted(files)])
 
-# ----------------------------
+@app.route("/groups/<name>", methods=["GET"])
+def load_group(name):
+    path = os.path.join(GROUPS_DIR, f"{name}.group")
+    if not os.path.exists(path):
+        return jsonify({"error": "not found"}), 404
+    with open(path) as f:
+        return jsonify(json.load(f))
+
+@app.route("/groups/<name>", methods=["PUT"])
+def save_group(name):
+    path = os.path.join(GROUPS_DIR, f"{name}.group")
+    with open(path, "w") as f:
+        json.dump(request.json, f, indent=2)
+    return jsonify({"ok": True})
+
+@app.route("/groups/<name>", methods=["DELETE"])
+def delete_group(name):
+    path = os.path.join(GROUPS_DIR, f"{name}.group")
+    if os.path.exists(path):
+        os.remove(path)
+    return jsonify({"ok": True})
 @app.route("/scan", methods=["POST"])
 def scan():
     clear_and_scan()
@@ -168,7 +203,22 @@ def adapters():
         for a in data if a.get("serialNumber")
     ])
 
+class WindowAPI:
+    def set_height(self, height):
+        webview.windows[0].resize(WIN_W, height)
+
 # ----------------------------
 if __name__ == "__main__":
     ensure_sdm()
-    app.run(port=WEB_PORT, debug=True)
+    t = threading.Thread(target=lambda: app.run(port=WEB_PORT, debug=False, use_reloader=False))
+    t.daemon = True
+    t.start()
+    webview.create_window(
+        "My Lab",
+        f"http://127.0.0.1:{WEB_PORT}",
+        width=WIN_W,
+        height=WIN_COLLAPSED,
+        resizable=True,
+        js_api=WindowAPI()
+    )
+    webview.start()

@@ -1,0 +1,13 @@
+{
+  "name": "test1",
+  "adapters": [
+    {
+      "serialNumber": "440330310",
+      "connectivityType": "usb"
+    },
+    {
+      "serialNumber": "440347570",
+      "connectivityType": "usb"
+    }
+  ]
+}
