@@ -20,12 +20,18 @@ body {
     border-bottom: 1px solid transparent;
     transition: border-color .3s;
 }
+.topbar-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 .topbar.expanded { border-bottom-color: #e0dfd9; }
 .app-title { font-size: 18px; font-weight: 500; letter-spacing: -.3px; flex-shrink: 0; }
 
 /* ── toggle button ── */
 #toggleBtn {
-    margin-left: auto;
     height: 32px;
     padding: 0 14px;
     border-radius: 8px;
@@ -49,6 +55,9 @@ body {
     max-height: 2000px;
     opacity: 1;
     padding: 20px 28px 28px;
+    height: calc(100vh - 82px);  /* ← 52 → 82 */
+    display: flex;
+    flex-direction: column;
 }
 
 /* ── progress bar ── */
@@ -110,14 +119,22 @@ button.success  { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
 button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 
 /* ── grid ── */
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-
+.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+}
 /* ── panels ── */
 .panel {
     background: #fff;
     border: 1px solid #e0dfd9;
     border-radius: 14px;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 .panel-header {
     padding: 9px 12px;
@@ -146,7 +163,12 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 }
 .panel-spacer { flex: 1; }
 .btn-sep { width: 1px; height: 18px; background: #e0dfd9; flex-shrink: 0; }
-.panel-body { padding: 10px; min-height: 120px; }
+.panel-body {
+    padding: 10px;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
 
 /* ── board cards (available) ── */
 .board-card {

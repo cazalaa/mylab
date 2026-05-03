@@ -19,6 +19,7 @@ WIN_EXPANDED   = 700   # hauteur dépliée
 from binresolve import resolve_sdm, resolve_commander
 
 CONFIG_FILE = "config.ini"
+ALLOWED_PAGES = {"maintenance", "test"}  # whitelist — ajoutez ici vos futures pages
 
 # ----------------------------
 # CONFIG + AUTO RESOLVE
@@ -151,6 +152,12 @@ def fw_upgrade():
 @app.route("/")
 def index():
     return render_template("index.html")
+
+@app.route("/page/<name>")
+def page(name):
+    if name not in ALLOWED_PAGES:
+        return "Not found", 404
+    return render_template(f"{name}.html")
 
 @app.route("/groups", methods=["GET"])
 def list_groups():

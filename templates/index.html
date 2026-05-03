@@ -17,380 +17,58 @@
             <div class="progress-bar" id="progressBar"></div>
         </div>
     </div>
-    <button id="toggleBtn" onclick="toggleExpand()" data-icon="Maintenance">Maintenance</button>
-</div>
-
-<!-- ── expandable content ── -->
-<div class="content-wrap" id="contentWrap">
-    <div class="grid">
-
-        <!-- AVAILABLE -->
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">Available</span>
-                <span class="panel-count" id="availableCount">0</span>
-                <div class="panel-spacer"></div>
-                <button class="icon-only" id="refreshBtn" onclick="refresh()" title="Refresh" data-icon="↺">↺</button>
-                <div class="btn-sep"></div>
-                <button id="allBtn" onclick="addAll()">Select All</button>
-            </div>
-            <div class="panel-body" id="list"></div>
-        </div>
-
-        <!-- SELECTED -->
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">Selected</span>
-                <span class="panel-count" id="selectedCount">0</span>
-                <div class="panel-spacer"></div>
-                <button class="icon-only" id="saveGroupBtn" onclick="toggleGroupPanel('save','saveGroupBtn')" title="Save group" data-icon="💾">💾</button>
-                <button class="icon-only" id="loadGroupBtn" onclick="toggleGroupPanel('load','loadGroupBtn')" title="Load group" data-icon="📂">📂</button>
-                <div class="btn-sep"></div>
-                <button id="eraseBtn" onclick="massErase()" data-icon="Erase">Erase</button>
-                <button id="fwBtn" onclick="upgradeFW()" class="primary" data-icon="↑ FW">↑ FW</button>
-            </div>
-            <div class="panel-body" id="selected" ondragover="event.preventDefault()" ondrop="onDrop(event)">
-                <div class="drop-hint" id="dropHint">Drag adapters here or click Select All</div>
-            </div>
-        </div>
-
+    <div class="topbar-actions">
+        <button id="btnMaintenance" onclick="togglePage('maintenance')" data-icon="Maintenance">Maintenance</button>
+        <button id="btnTest"        onclick="togglePage('test')"        data-icon="Test">Test</button>
     </div>
 </div>
 
-<!-- ── floating group panel ── -->
-<div class="group-panel" id="groupPanel">
-    <div class="group-panel-header">
-        <span class="group-panel-title" id="groupPanelTitle">Groups</span>
-        <span class="group-close" onclick="closeGroupPanel()">✕</span>
-    </div>
-    <div class="group-panel-body">
-        <div class="group-input-row" id="saveRow" style="display:none">
-            <input class="group-input" id="groupNameInput" placeholder="group name" />
-            <button onclick="saveGroup()">Save</button>
-        </div>
-        <div class="group-list" id="groupList"></div>
-    </div>
-</div>
+<!-- ── expandable content (filled dynamically) ── -->
+<div class="content-wrap" id="contentWrap"></div>
 
 <script>
-let selected       = new Set();
-let cache          = [];
-let expanded       = false;
-let groupPanelMode = null;
+let activePage = null;
 
-// ── expand / collapse ─────────────────────────────
-function toggleExpand() {
-    expanded = !expanded;
-    document.getElementById("contentWrap").classList.toggle("expanded", expanded);
-    document.getElementById("toggleBtn").classList.toggle("open", expanded);
-    document.getElementById("topbar").classList.toggle("expanded", expanded);
-    if (expanded) load();
-    if (window.pywebview) window.pywebview.api.set_height(expanded ? 700 : 82);
-}
+async function togglePage(name) {
+    const wrap   = document.getElementById("contentWrap");
+    const topbar = document.getElementById("topbar");
 
-// ── counts ────────────────────────────────────────
-function updateCounts() {
-    document.getElementById("availableCount").innerText = cache.length;
-    document.getElementById("selectedCount").innerText  = selected.size;
-}
-
-// ── progress ──────────────────────────────────────
-function showProgress(label, done, total) {
-    document.getElementById("progressWrap").classList.add("visible");
-    const bar = document.getElementById("progressBar");
-    bar.classList.remove("done-ok", "done-err");
-    document.getElementById("progressLabel").innerText = `${label}  ${done} / ${total} adapters`;
-    bar.style.width = total > 0 ? `${Math.round(done / total * 100)}%` : "0%";
-}
-
-function finishProgress(allOk) {
-    const bar = document.getElementById("progressBar");
-    bar.classList.add(allOk ? "done-ok" : "done-err");
-    setTimeout(() => {
-        document.getElementById("progressWrap").classList.remove("visible");
-        bar.classList.remove("done-ok", "done-err");
-        bar.style.width = "0%";
-    }, 3500);
-}
-
-// ── lock buttons ──────────────────────────────────
-function setButtonsLocked(locked) {
-    ["refreshBtn","allBtn","saveGroupBtn","loadGroupBtn","eraseBtn","fwBtn"]
-        .forEach(id => { document.getElementById(id).disabled = locked; });
-}
-
-// ── refresh ───────────────────────────────────────
-async function refresh() {
-    const btn  = document.getElementById("refreshBtn");
-    const icon = btn.dataset.icon;
-    btn.innerText = "…";
-    btn.classList.remove("success");
-    await fetch('/scan', { method: 'POST' });
-    await new Promise(r => setTimeout(r, 1500));
-    await load();
-    btn.innerText = "✓";
-    btn.classList.add("success");
-    setTimeout(() => { btn.classList.remove("success"); btn.innerText = icon; }, 3000);
-}
-
-// ── load adapters ─────────────────────────────────
-async function load() {
-    const res = await fetch('/adapters');
-    cache = await res.json();
-
-    const list = document.getElementById("list");
-    list.innerHTML = "";
-
-    if (cache.length === 0) {
-        list.innerHTML = '<div class="drop-hint">No adapters found</div>';
-        updateCounts();
+    // Si la même page est déjà ouverte → fermer
+    if (activePage === name) {
+        activePage = null;
+        wrap.classList.remove("expanded");
+        topbar.classList.remove("expanded");
+        document.querySelectorAll(".topbar-actions button").forEach(b => b.classList.remove("open"));
+        if (window.pywebview) window.pywebview.api.set_height(82);
         return;
     }
 
-    cache.forEach(a => {
-        const card = document.createElement("div");
-        card.className = "board-card";
-        card.draggable = true;
-        card.ondragstart = e => e.dataTransfer.setData("t", JSON.stringify(a));
-        card.onclick = () => addBoard(a);
+    // Charger le fragment HTML depuis Flask
+    const res  = await fetch(`/page/${name}`);
+    const html = await res.text();
+    wrap.innerHTML = html;
 
-        const isIP         = a.connectivityType !== "usb";
-        const nicknameSpan = a.nickname ? `<span class="board-nickname"> — ${a.nickname}</span>` : "";
-        const secondLine   = [a.boardLabel, a.label].filter(Boolean).join(" · ");
-        const typeLabel    = isIP && a.host ? a.host : (a.connectivityType || "?");
-        const typeClass    = isIP ? "pill-ip" : "pill-usb";
-
-        card.innerHTML = `
-            <div class="board-info">
-                <div class="board-serial-line">
-                    <span class="board-serial">${a.serialNumber}</span>
-                    ${nicknameSpan}
-                </div>
-                <span class="board-label">${secondLine}</span>
-            </div>
-            <div class="board-right">
-                <span class="pill ${typeClass}">${typeLabel}</span>
-                ${selected.has(a.serialNumber) ? '<span class="star-icon">★</span>' : ''}
-            </div>`;
-        list.appendChild(card);
+    // Exécuter les scripts éventuellement inclus dans le fragment
+    wrap.querySelectorAll("script").forEach(old => {
+        const s = document.createElement("script");
+        s.textContent = old.textContent;
+        document.body.appendChild(s);
+        old.remove();
     });
 
-    updateCounts();
+    activePage = name;
+    wrap.classList.add("expanded");
+    topbar.classList.add("expanded");
+
+    // Bouton actif
+    document.querySelectorAll(".topbar-actions button").forEach(b => b.classList.remove("open"));
+    document.getElementById(`btn${name.charAt(0).toUpperCase() + name.slice(1)}`).classList.add("open");
+
+    if (window.pywebview) window.pywebview.api.set_height(700);
+
+    // Appeler onPageLoad() si défini dans le fragment
+    if (typeof onPageLoad === "function") onPageLoad();
 }
-
-// ── selected panel ────────────────────────────────
-function renderSelected() {
-    const container = document.getElementById("selected");
-    const hint      = document.getElementById("dropHint");
-    container.querySelectorAll(".sel-card").forEach(e => e.remove());
-
-    if (selected.size === 0) {
-        hint.style.display = "";
-        updateCounts();
-        return;
-    }
-    hint.style.display = "none";
-
-    cache.filter(a => selected.has(a.serialNumber)).forEach(a => {
-        const isIP       = a.connectivityType !== "usb";
-        const secondLine = [a.boardLabel, a.label].filter(Boolean).join(" · ");
-        const hostSuffix = isIP && a.host ? ` — ${a.host}` : "";
-
-        const card = document.createElement("div");
-        card.className = "sel-card";
-        card.dataset.serial = a.serialNumber;
-        card.innerHTML = `
-            <div>
-                <div class="sel-serial">${a.serialNumber}${a.nickname ? ` — ${a.nickname}` : ""}</div>
-                <div class="sel-id">${secondLine}${hostSuffix}</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-                <span class="card-status" id="status-${a.serialNumber}"></span>
-                <button class="remove-btn" title="Remove">✕</button>
-            </div>`;
-        card.querySelector(".remove-btn").onclick = () => {
-            selected.delete(a.serialNumber);
-            renderSelected();
-            load();
-        };
-        container.appendChild(card);
-    });
-
-    updateCounts();
-}
-
-// ── card status ───────────────────────────────────
-function setCardStatus(serial, state) {
-    const el = document.getElementById(`status-${serial}`);
-    if (!el) return;
-    el.className = `card-status ${state}`;
-    el.innerText = state === "ok" ? "✓" : state === "err" ? "✕" : "";
-    const card = el.closest(".sel-card");
-    if (card) card.classList.toggle("running", state === "spinning");
-}
-
-// ── generic action runner ─────────────────────────
-async function runAction(btnId, icon, endpoint, label) {
-    const btn  = document.getElementById(btnId);
-    const list = cache.filter(a => selected.has(a.serialNumber));
-    const total = list.length;
-    if (total === 0) return;
-
-    btn.innerText = "…";
-    btn.classList.remove("success", "error");
-    setButtonsLocked(true);
-    list.forEach(a => setCardStatus(a.serialNumber, "spinning"));
-    showProgress(label, 0, total);
-
-    const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adapters: list })
-    });
-    const results = await res.json();
-
-    for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        setCardStatus(r.serialNumber, r.ok ? "ok" : "err");
-        showProgress(label, i + 1, total);
-        await new Promise(r => setTimeout(r, 120));
-    }
-
-    const allOk = results.every(r => r.ok);
-    btn.innerText = allOk ? "✓" : "✕";
-    btn.classList.add(allOk ? "success" : "error");
-    setButtonsLocked(false);
-    finishProgress(allOk);
-
-    setTimeout(() => {
-        btn.classList.remove("success", "error");
-        btn.innerText = icon;
-        results.forEach(r => setCardStatus(r.serialNumber, ""));
-    }, 4000);
-}
-
-async function massErase() { await runAction("eraseBtn", "Erase", "/mass_erase", "Erasing"); }
-async function upgradeFW()  { await runAction("fwBtn",   "↑ FW",  "/fw_upgrade", "Upgrading FW"); }
-
-// ── selection ─────────────────────────────────────
-function addBoard(a) {
-    if (selected.has(a.serialNumber)) return;
-    selected.add(a.serialNumber);
-    renderSelected();
-    load();
-}
-
-function addAll() { cache.forEach(addBoard); }
-
-function onDrop(e) {
-    const a = JSON.parse(e.dataTransfer.getData("t"));
-    addBoard(a);
-}
-
-// ── group panel ───────────────────────────────────
-function closeGroupPanel() {
-    document.getElementById("groupPanel").classList.remove("visible");
-    groupPanelMode = null;
-}
-
-async function toggleGroupPanel(mode, anchorId) {
-    const panel  = document.getElementById("groupPanel");
-    const isOpen = panel.classList.contains("visible") && groupPanelMode === mode;
-    if (isOpen) { closeGroupPanel(); return; }
-
-    const anchor = document.getElementById(anchorId);
-    const rect   = anchor.getBoundingClientRect();
-    panel.style.right = (window.innerWidth - rect.right) + "px";
-
-    groupPanelMode = mode;
-    panel.classList.add("visible");
-    document.getElementById("groupPanelTitle").innerText = mode === "save" ? "Save group" : "Load group";
-    document.getElementById("saveRow").style.display     = mode === "save" ? "flex" : "none";
-    if (mode === "save") setTimeout(() => document.getElementById("groupNameInput").focus(), 50);
-
-    await refreshGroupList(mode);
-}
-
-async function refreshGroupList(mode) {
-    const res   = await fetch("/groups");
-    const names = await res.json();
-    const container = document.getElementById("groupList");
-    container.innerHTML = "";
-
-    if (names.length === 0) {
-        container.innerHTML = '<div class="group-empty">No saved groups</div>';
-        return;
-    }
-
-    for (const name of names) {
-        const gres  = await fetch(`/groups/${encodeURIComponent(name)}`);
-        const gdata = await gres.json();
-        const count = (gdata.adapters || []).length;
-
-        const item = document.createElement("div");
-        item.className = "group-item";
-        item.innerHTML = `
-            <span class="group-item-name">${name}</span>
-            <span class="group-item-count">${count} adapter${count !== 1 ? "s" : ""}</span>
-            <span class="group-item-del" title="Delete">🗑</span>`;
-
-        const onSelect = () => {
-            if (mode === "load") loadGroup(name, gdata);
-            else document.getElementById("groupNameInput").value = name;
-        };
-        item.querySelector(".group-item-name").onclick  = onSelect;
-        item.querySelector(".group-item-count").onclick = onSelect;
-        item.querySelector(".group-item-del").onclick   = async (e) => {
-            e.stopPropagation();
-            await fetch(`/groups/${encodeURIComponent(name)}`, { method: "DELETE" });
-            await refreshGroupList(mode);
-        };
-
-        container.appendChild(item);
-    }
-}
-
-async function saveGroup() {
-    const name = document.getElementById("groupNameInput").value.trim();
-    if (!name) return;
-
-    const adapters = cache
-        .filter(a => selected.has(a.serialNumber))
-        .map(a => ({
-            serialNumber:     a.serialNumber,
-            connectivityType: a.connectivityType,
-            ...(a.connectivityType !== "usb" && a.host ? { host: a.host } : {})
-        }));
-
-    await fetch(`/groups/${encodeURIComponent(name)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, adapters })
-    });
-
-    await refreshGroupList("save");
-}
-
-function loadGroup(name, gdata) {
-    selected.clear();
-    for (const entry of gdata.adapters || []) {
-        const found = cache.find(a => a.serialNumber === entry.serialNumber);
-        if (found) selected.add(found.serialNumber);
-    }
-    renderSelected();
-    load();
-    closeGroupPanel();
-}
-
-document.addEventListener("click", e => {
-    const panel = document.getElementById("groupPanel");
-    if (!panel.classList.contains("visible")) return;
-    if (panel.contains(e.target)) return;
-    if (["saveGroupBtn","loadGroupBtn"].includes(e.target.id)) return;
-    closeGroupPanel();
-});
-
-window.onload = () => { /* démarrage en mode réduit */ };
 </script>
 </body>
 </html>
