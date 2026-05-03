@@ -4,6 +4,7 @@ import requests
 import configparser
 import os
 from flask import Flask, jsonify, render_template, request 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import glob
 import webview
@@ -101,25 +102,29 @@ def extract_board(a):
 # ----------------------------
 # COMMANDER ACTIONS
 # ----------------------------
+
+def run_commander(cmd, serial):
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return {"serialNumber": serial, "ok": True, "output": result.stdout}
+    except subprocess.CalledProcessError as e:
+        return {"serialNumber": serial, "ok": False, "error": e.stderr or str(e)}
+    except Exception as e:
+        return {"serialNumber": serial, "ok": False, "error": str(e)}
+
 @app.route("/mass_erase", methods=["POST"])
 def mass_erase():
     adapters = request.json.get("adapters", [])
-    results = []
 
-    for a in adapters:
-        try:
-            if a["connectivityType"] == "usb":
-                cmd = [COMMANDER_PATH, "device", "masserase", "--serialno", a["serialNumber"]]
-            else:
-                cmd = [COMMANDER_PATH, "device", "masserase", "--ip", a["host"]]
-            subprocess.run(cmd, check=True)
-            results.append({"serialNumber": a["serialNumber"], "ok": True})
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] mass_erase {a.get('serialNumber')}: exit {e.returncode}")
-            results.append({"serialNumber": a["serialNumber"], "ok": False})
-        except Exception as e:
-            print(f"[ERROR] mass_erase unexpected: {e}")
-            results.append({"serialNumber": a["serialNumber"], "ok": False})
+    def erase(a):
+        cmd = [COMMANDER_PATH, "device", "masserase",
+               "--serialno" if a["connectivityType"] == "usb" else "--ip",
+               a["serialNumber"] if a["connectivityType"] == "usb" else a["host"]]
+        return run_commander(cmd, a["serialNumber"])
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(erase, a): a for a in adapters}
+        results = [f.result() for f in as_completed(futures)]
 
     return jsonify(results)
 
@@ -127,22 +132,16 @@ def mass_erase():
 @app.route("/fw_upgrade", methods=["POST"])
 def fw_upgrade():
     adapters = request.json.get("adapters", [])
-    results = []
 
-    for a in adapters:
-        try:
-            if a["connectivityType"] == "usb":
-                cmd = [COMMANDER_PATH, "adapter", "fwupgrade", "-s", a["serialNumber"]]
-            else:
-                cmd = [COMMANDER_PATH, "adapter", "fwupgrade", "--ip", a["host"]]
-            subprocess.run(cmd, check=True)
-            results.append({"serialNumber": a["serialNumber"], "ok": True})
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] fw_upgrade {a.get('serialNumber')}: exit {e.returncode}")
-            results.append({"serialNumber": a["serialNumber"], "ok": False})
-        except Exception as e:
-            print(f"[ERROR] fw_upgrade unexpected: {e}")
-            results.append({"serialNumber": a["serialNumber"], "ok": False})
+    def upgrade(a):
+        cmd = [COMMANDER_PATH, "adapter", "fwupgrade",
+               "-s" if a["connectivityType"] == "usb" else "--ip",
+               a["serialNumber"] if a["connectivityType"] == "usb" else a["host"]]
+        return run_commander(cmd, a["serialNumber"])
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(upgrade, a): a for a in adapters}
+        results = [f.result() for f in as_completed(futures)]
 
     return jsonify(results)
 

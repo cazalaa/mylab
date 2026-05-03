@@ -49,11 +49,15 @@
 </div>
 
 <script>
-let selected       = new Set();
-let cache          = [];
+let selected = window.appState.selected;
+let cache    = window.appState.cache;
 let groupPanelMode = null;
 
-function onPageLoad() { load(); }
+function onPageLoad() {
+    load().then(() => {
+        if (selected.size > 0) renderSelected();
+    });
+}
 
 // ── counts ────────────────────────────────────────
 function updateCounts() {
@@ -168,7 +172,10 @@ function renderSelected() {
         card.dataset.serial = a.serialNumber;
         card.innerHTML = `
             <div>
-                <div class="sel-serial">${a.serialNumber}${a.nickname ? ` — ${a.nickname}` : ""}</div>
+                <div class="sel-serial">
+                    ${a.serialNumber}
+                    ${a.nickname ? `<span class="sel-serial-nick"> — ${a.nickname}</span>` : ""}
+                </div>
                 <div class="sel-id">${secondLine}${hostSuffix}</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px">
@@ -229,13 +236,38 @@ async function runAction(btnId, icon, endpoint, label) {
     setButtonsLocked(false);
     finishProgress(allOk);
 
+    // Rapport d'erreurs
+    const failed = results.filter(r => !r.ok);
+    if (failed.length > 0) showErrorReport(label, failed);
+
     setTimeout(() => {
         btn.classList.remove("success", "error");
         btn.innerText = icon;
         results.forEach(r => setCardStatus(r.serialNumber, ""));
-    }, 4000);
+}, 4000);
 }
 
+function showErrorReport(action, failed) {
+    const existing = document.getElementById("errorReport");
+    if (existing) existing.remove();
+
+    const report = document.createElement("div");
+    report.id = "errorReport";
+    report.className = "error-report";
+    report.innerHTML = `
+        <div class="error-report-header">
+            <span class="error-report-title">⚠ ${action} — ${failed.length} failure${failed.length > 1 ? "s" : ""}</span>
+            <span class="error-report-close" onclick="this.closest('.error-report').remove()">✕</span>
+        </div>
+        <div class="error-report-body">
+            ${failed.map(r => `
+                <div class="error-report-item">
+                    <span class="error-report-serial">${r.serialNumber}</span>
+                    <span class="error-report-msg">${r.error || "Unknown error"}</span>
+                </div>`).join("")}
+        </div>`;
+    document.getElementById("contentWrap").appendChild(report);
+}
 async function massErase() { await runAction("eraseBtn", "Erase", "/mass_erase", "Erasing"); }
 async function upgradeFW()  { await runAction("fwBtn",   "↑ FW",  "/fw_upgrade", "Upgrading FW"); }
 

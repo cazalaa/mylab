@@ -29,11 +29,15 @@
 <script>
 let activePage = null;
 
+window.appState = {
+    selected: new Set(),
+    cache: []
+};
+
 async function togglePage(name) {
     const wrap   = document.getElementById("contentWrap");
     const topbar = document.getElementById("topbar");
 
-    // Si la même page est déjà ouverte → fermer
     if (activePage === name) {
         activePage = null;
         wrap.classList.remove("expanded");
@@ -43,12 +47,10 @@ async function togglePage(name) {
         return;
     }
 
-    // Charger le fragment HTML depuis Flask
     const res  = await fetch(`/page/${name}`);
     const html = await res.text();
     wrap.innerHTML = html;
 
-    // Exécuter les scripts éventuellement inclus dans le fragment
     wrap.querySelectorAll("script").forEach(old => {
         const s = document.createElement("script");
         s.textContent = old.textContent;
@@ -60,13 +62,11 @@ async function togglePage(name) {
     wrap.classList.add("expanded");
     topbar.classList.add("expanded");
 
-    // Bouton actif
     document.querySelectorAll(".topbar-actions button").forEach(b => b.classList.remove("open"));
     document.getElementById(`btn${name.charAt(0).toUpperCase() + name.slice(1)}`).classList.add("open");
 
     if (window.pywebview) window.pywebview.api.set_height(700);
 
-    // Appeler onPageLoad() si défini dans le fragment
     if (typeof onPageLoad === "function") onPageLoad();
 }
 </script>
