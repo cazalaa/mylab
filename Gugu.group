@@ -1,0 +1,10 @@
+{
+  "name": "Gugu",
+  "adapters": [
+    {
+      "serialNumber": "440114849",
+      "connectivityType": "ethernet",
+      "host": "192.168.0.94"
+    }
+  ]
+}

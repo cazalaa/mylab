@@ -19,7 +19,7 @@ GROUPS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Dimensions
 WIN_W          = 800
-WIN_COLLAPSED  = 82    # hauteur barre compacte
+WIN_COLLAPSED  = 72    # hauteur barre compacte
 WIN_EXPANDED   = 700   # hauteur dépliée
 
 from binresolve import resolve_sdm, resolve_commander

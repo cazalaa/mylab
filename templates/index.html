@@ -10,18 +10,17 @@
 
 <!-- ── topbar (always visible) ── -->
 <div class="topbar" id="topbar">
-    <span class="app-title">Action Bar</span>
-    <div class="progress-wrap" id="progressWrap">
+    <div class="topbar-actions">
+        <button id="btnSdm"         onclick="launchSdm()"       >Sdm</button>
+        <button id="btnMaintenance" onclick="togglePage('maintenance')" data-icon="Maintenance">Maintenance</button>
+        <button id="btnManualControl" onclick="togglePage('manual_control')" data-icon="Manual Control">Manual Control</button>
+        <button id="btnScriptControl" onclick="togglePage('script_control')" data-icon="Script Control">Script Control</button>
+    </div>
+       <div class="progress-wrap" id="progressWrap">
         <span class="progress-label" id="progressLabel"></span>
         <div class="progress-track">
             <div class="progress-bar" id="progressBar"></div>
         </div>
-    </div>
-    <div class="topbar-actions">
-        <button id="btnSdm"         onclick="launchSdm()"       >SDM</button>
-        <button id="btnMaintenance" onclick="togglePage('maintenance')" data-icon="Maintenance">Maintenance</button>
-        <button id="btnManualControl" onclick="togglePage('manual_control')" data-icon="Manual Control">Manual Control</button>
-        <button id="btnScriptControl" onclick="togglePage('script_control')" data-icon="Script Control">Script Control</button>
     </div>
 </div>
 
