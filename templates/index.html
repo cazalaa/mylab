@@ -10,7 +10,7 @@
 
 <!-- ── topbar (always visible) ── -->
 <div class="topbar" id="topbar">
-    <span class="app-title">My Lab</span>
+    <span class="app-title">Action Bar</span>
     <div class="progress-wrap" id="progressWrap">
         <span class="progress-label" id="progressLabel"></span>
         <div class="progress-track">
@@ -18,8 +18,10 @@
         </div>
     </div>
     <div class="topbar-actions">
+        <button id="btnSdm"         onclick="launchSdm()"       >SDM</button>
         <button id="btnMaintenance" onclick="togglePage('maintenance')" data-icon="Maintenance">Maintenance</button>
-        <button id="btnTest"        onclick="togglePage('test')"        data-icon="Test">Test</button>
+        <button id="btnManualControl" onclick="togglePage('manual_control')" data-icon="Manual Control">Manual Control</button>
+        <button id="btnScriptControl" onclick="togglePage('script_control')" data-icon="Script Control">Script Control</button>
     </div>
 </div>
 
@@ -33,6 +35,30 @@ window.appState = {
     selected: new Set(),
     cache: []
 };
+async function refreshCache() {
+    const res = await fetch('/adapters');
+    window.appState.cache = await res.json();
+}
+async function launchSdm() {
+    const btn  = document.getElementById("btnSdm");
+    const icon = btn.innerText;
+    btn.innerText = "…";
+    btn.disabled = true;
+
+    const res = await fetch("/sdm/ui", { method: "POST" });
+    const data = await res.json();
+
+    btn.innerText = data.ok ? "✓" : "✕";
+    btn.classList.add(data.ok ? "success" : "error");
+
+    setTimeout(() => {
+        btn.classList.remove("success", "error");
+        btn.innerText = icon;
+        btn.disabled = false;
+    }, 3000);
+}
+
+const loadedPages = new Set();
 
 async function togglePage(name) {
     const wrap   = document.getElementById("contentWrap");
@@ -40,6 +66,7 @@ async function togglePage(name) {
 
     if (activePage === name) {
         activePage = null;
+        document.getElementById(`page-${name}`).style.display = "none";
         wrap.classList.remove("expanded");
         topbar.classList.remove("expanded");
         document.querySelectorAll(".topbar-actions button").forEach(b => b.classList.remove("open"));
@@ -47,27 +74,48 @@ async function togglePage(name) {
         return;
     }
 
-    const res  = await fetch(`/page/${name}`);
-    const html = await res.text();
-    wrap.innerHTML = html;
+    // Cacher la page courante
+    if (activePage) {
+        document.getElementById(`page-${activePage}`).style.display = "none";
+    }
 
-    wrap.querySelectorAll("script").forEach(old => {
-        const s = document.createElement("script");
-        s.textContent = old.textContent;
-        document.body.appendChild(s);
-        old.remove();
-    });
+    if (!loadedPages.has(name)) {
+        // Première fois — charger et injecter
+        await refreshCache();
+        const res  = await fetch(`/page/${name}`);
+        const html = await res.text();
+
+        const div = document.createElement("div");
+        div.id = `page-${name}`;
+        wrap.appendChild(div);
+        div.innerHTML = html;
+
+        div.querySelectorAll("script").forEach(old => {
+            const s = document.createElement("script");
+            s.textContent = old.textContent;
+            document.body.appendChild(s);
+            old.remove();
+        });
+
+        loadedPages.add(name);
+        if (typeof onPageLoad === "function") onPageLoad();
+
+    } else {
+        // Déjà chargée — montrer et rafraîchir
+        document.getElementById(`page-${name}`).style.display = "";
+        await refreshCache();
+        if (typeof onPageLoad === "function") onPageLoad();
+    }
 
     activePage = name;
     wrap.classList.add("expanded");
     topbar.classList.add("expanded");
 
     document.querySelectorAll(".topbar-actions button").forEach(b => b.classList.remove("open"));
-    document.getElementById(`btn${name.charAt(0).toUpperCase() + name.slice(1)}`).classList.add("open");
+    const btnId = "btn" + name.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("");
+    document.getElementById(btnId).classList.add("open");
 
     if (window.pywebview) window.pywebview.api.set_height(700);
-
-    if (typeof onPageLoad === "function") onPageLoad();
 }
 </script>
 </body>

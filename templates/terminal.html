@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Terminal</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/xterm.min.css">
+<script src="/static/xterm.min.js"></script>
+<script src="/static/socket.io.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: #1a1a1a;
+    color: #f4f3f0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── header ── */
+.term-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #222;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+}
+.term-serial {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: #f4f3f0;
+}
+.term-label { font-size: 11px; color: #888; }
+.term-host {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #1D9E75;
+    margin-left: auto;
+}
+
+/* ── tabs ── */
+.term-tabs {
+    display: flex;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+}
+.term-tab {
+    padding: 8px 20px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #666;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+    user-select: none;
+}
+.term-tab:hover  { color: #aaa; }
+.term-tab.active { color: #f4f3f0; border-bottom-color: #1D9E75; }
+
+.term-tab-status {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #444;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.term-tab-status.connected  { background: #1D9E75; }
+.term-tab-status.error      { background: #E24B4A; }
+.term-tab-status.connecting { background: #EF9F27; }
+
+/* ── terminal panes ── */
+.term-panes {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.term-pane {
+    flex: 1;
+    display: none;
+    padding: 8px;
+    overflow: hidden;
+    min-height: 0;
+}
+.term-pane.active { display: flex; flex-direction: column; }
+
+/* xterm fills the pane */
+.term-pane .xterm          { flex: 1; min-height: 0; }
+.term-pane .xterm-viewport { overflow-y: scroll !important; }
+
+/* scrollbar styling */
+.term-pane .xterm-viewport::-webkit-scrollbar       { width: 6px; }
+.term-pane .xterm-viewport::-webkit-scrollbar-track { background: #1a1a1a; }
+.term-pane .xterm-viewport::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+.term-pane .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #666; }
+
+/* ── input bar ── */
+.term-input-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #222;
+    border-top: 1px solid #333;
+    flex-shrink: 0;
+}
+.term-prompt {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    color: #1D9E75;
+    flex-shrink: 0;
+}
+.term-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: #f4f3f0;
+    caret-color: #1D9E75;
+}
+.term-input::placeholder { color: #444; }
+.term-send-btn {
+    background: transparent;
+    border: 1px solid #333;
+    border-radius: 5px;
+    color: #666;
+    font-size: 13px;
+    width: 28px; height: 28px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color .15s, border-color .15s;
+}
+.term-send-btn:hover { color: #f4f3f0; border-color: #666; }
+</style>
+</head>
+<body>
+
+<div class="term-header">
+    <div>
+        <div class="term-serial" id="termSerial">—</div>
+        <div class="term-label"  id="termLabel">Loading…</div>
+    </div>
+    <div class="term-host" id="termHost">—</div>
+</div>
+
+<div class="term-tabs">
+    <div class="term-tab active" id="tabVcom"  onclick="switchTab('vcom')">
+        <span class="term-tab-status connecting" id="statusVcom"></span>VCOM
+    </div>
+    <div class="term-tab" id="tabAdmin" onclick="switchTab('admin')">
+        <span class="term-tab-status connecting" id="statusAdmin"></span>ADMIN
+    </div>
+</div>
+
+<div class="term-panes">
+    <div class="term-pane active" id="paneVcom"></div>
+    <div class="term-pane"        id="paneAdmin"></div>
+</div>
+
+<div class="term-input-bar">
+    <span class="term-prompt">›</span>
+    <input type="text" id="termInput" class="term-input" 
+           placeholder="Type command…" autocomplete="off" spellcheck="false"/>
+    <button class="term-send-btn" onclick="sendCommand()">⏎</button>
+</div>
+
+<script>
+const serial    = location.pathname.split("/").filter(p => p.length > 0).pop();
+const socket    = io();
+socket.on("connect", () => {
+    console.log("socket connected:", socket.id);
+});
+socket.on("connect_error", (e) => {
+    console.error("socket error:", e);
+});
+let info        = null;
+let terminals   = {};
+let activeTab   = "vcom";
+
+// ── historique des commandes ──────────────────────
+const cmdHistory = [];
+let historyIdx   = -1;
+
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("termInput");
+    if (!input) return;
+
+    input.addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+            sendCommand();
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (historyIdx < cmdHistory.length - 1) {
+                historyIdx++;
+                input.value = cmdHistory[cmdHistory.length - 1 - historyIdx];
+            }
+        } else if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (historyIdx > 0) {
+                historyIdx--;
+                input.value = cmdHistory[cmdHistory.length - 1 - historyIdx];
+            } else {
+                historyIdx = -1;
+                input.value = "";
+            }
+        }
+    });
+
+    // Focus automatique sur l'input
+    input.focus();
+});
+
+function sendCommand() {
+    const input = document.getElementById("termInput");
+    const cmd   = input.value;
+    if (!cmd) return;
+
+    // Ajouter à l'historique
+    if (cmdHistory[cmdHistory.length - 1] !== cmd) {
+        cmdHistory.push(cmd);
+    }
+    historyIdx = -1;
+
+    // Envoyer au terminal actif
+    const room = `${serial}_${activeTab}`;
+    socket.emit("terminal_input", { room, data: cmd + "\r\n" });
+
+    // Afficher dans xterm
+    terminals[activeTab]?.term.writeln(`\x1b[90m› ${cmd}\x1b[0m`);
+
+    input.value = "";
+    input.focus();
+}
+
+// ── init ──────────────────────────────────────────
+async function init() {
+    try {
+        const res = await fetch(`/api/terminal-info/${serial}`);
+        info = await res.json();
+    } catch(e) {
+        document.getElementById("termLabel").innerText = "Error: " + e.message;
+        return;
+    }
+
+    if (info.error) {
+        document.getElementById("termLabel").innerText = "Error: " + info.error;
+        return;
+    }
+
+    document.getElementById("termSerial").innerText =
+        info.serial + (info.nickname ? ` — ${info.nickname}` : "");
+    document.getElementById("termLabel").innerText = info.label || "";
+
+    if (info.tty) {
+        // USB TTY — VCOM only, no ADMIN
+        document.getElementById("termHost").innerText = `TTY: ${info.tty}`;
+        document.getElementById("tabAdmin").style.display = "none";
+        createTerminalTTY("vcom", "paneVcom", info.tty);
+    } else {
+        // Network (ethernet/IP)
+        document.getElementById("termHost").innerText =
+            `${info.host}  VCOM:${info.vcom}  ADMIN:${info.admin}`;
+        createTerminal("vcom",  "paneVcom",  info.host, info.vcom);
+        createTerminal("admin", "paneAdmin", info.host, info.admin);
+    }
+}
+
+
+// ── terminal factory ──────────────────────────────
+function termConfig() {
+    return {
+        fontFamily:  "'IBM Plex Mono', monospace",
+        fontSize:    13,
+        scrollback:  300,
+        theme: {
+            background: "#1a1a1a",
+            foreground: "#f4f3f0",
+            cursor:     "#1D9E75",
+            selection:  "#ffffff33",
+        },
+        cursorBlink: true,
+    };
+}
+
+function fitTerm(term, pane) {
+    const lineHeight = Math.ceil(term.options.fontSize * 1.5);
+    const cols = Math.max(40, Math.floor((pane.clientWidth  - 16) / (term.options.fontSize * 0.6)));
+    const rows = Math.max(10, Math.floor((pane.clientHeight - 16) / lineHeight));
+    term.resize(cols, rows);
+}
+
+function createTerminal(kind, paneId, host, port) {
+    const pane = document.getElementById(paneId);
+    const term = new Terminal(termConfig());
+    term.open(pane);
+    fitTerm(term, pane);
+    terminals[kind] = { term, pane };
+
+    const room = `${serial}_${kind}`;
+    setStatus(kind, "connecting");
+    term.writeln(`\x1b[33mConnecting to ${host}:${port}…\x1b[0m`);
+
+    if (socket.connected) {
+        socket.emit("connect_telnet", { room, host, port: String(port) });
+    } else {
+        socket.once("connect", () => socket.emit("connect_telnet", { room, host, port: String(port) }));
+    }
+
+    term.onData(data => {
+        const out = data.replace(/\r/g, "\r\n");
+        socket.emit("terminal_input", { room, data: out });
+    });
+}
+
+function createTerminalTTY(kind, paneId, tty) {
+    const pane = document.getElementById(paneId);
+    const term = new Terminal(termConfig());
+    term.open(pane);
+    fitTerm(term, pane);
+    terminals[kind] = { term, pane };
+
+    const room = `${serial}_${kind}`;
+    setStatus(kind, "connecting");
+    term.writeln(`\x1b[33mConnecting to TTY ${tty}…\x1b[0m`);
+
+    if (socket.connected) {
+        socket.emit("connect_tty", { room, tty });
+    } else {
+        socket.once("connect", () => socket.emit("connect_tty", { room, tty }));
+    }
+
+    term.onData(data => socket.emit("terminal_input", { room, data }));
+}
+// ── socket events ─────────────────────────────────
+socket.on("terminal_ready", ({ room }) => {
+    const kind = room.split("_").pop();
+    setStatus(kind, "connected");
+    terminals[kind]?.term.writeln("\x1b[32mConnected.\x1b[0m");
+});
+
+socket.on("terminal_output", ({ data, room }) => {
+    const kind = room.split("_").pop();
+    terminals[kind]?.term.write(data);
+});
+
+socket.on("terminal_closed", ({ room }) => {
+    const kind = room ? room.split("_").pop() : activeTab;
+    terminals[kind]?.term.writeln("\x1b[31m\r\nConnection closed.\x1b[0m");
+    setStatus(kind, "error");
+});
+
+socket.on("terminal_error", ({ message }) => {
+    terminals[activeTab]?.term.writeln(`\x1b[31mError: ${message}\x1b[0m`);
+    setStatus(activeTab, "error");
+});
+
+// ── tabs ──────────────────────────────────────────
+function switchTab(kind) {
+    activeTab = kind;
+    document.querySelectorAll(".term-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".term-pane").forEach(p => p.classList.remove("active"));
+    document.getElementById(`tab${cap(kind)}`).classList.add("active");
+    document.getElementById(`pane${cap(kind)}`).classList.add("active");
+    const t = terminals[kind];
+    if (t) {
+        setTimeout(() => fitTerm(t.term, t.pane), 50);
+        t.term.focus();
+    }
+}
+
+// ── status dots ───────────────────────────────────
+function setStatus(kind, state) {
+    const el = document.getElementById(`status${cap(kind)}`);
+    if (el) el.className = `term-tab-status ${state}`;
+}
+
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// ── resize ────────────────────────────────────────
+window.addEventListener("resize", () => {
+    const t = terminals[activeTab];
+    if (t) fitTerm(t.term, t.pane);
+});
+
+// ── start ─────────────────────────────────────────
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+} else {
+    init();
+}
+</script>
+</body>
+</html>

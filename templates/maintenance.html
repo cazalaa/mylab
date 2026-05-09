@@ -54,9 +54,11 @@ let cache    = window.appState.cache;
 let groupPanelMode = null;
 
 function onPageLoad() {
-    load().then(() => {
-        if (selected.size > 0) renderSelected();
-    });
+    // Cache déjà chargé par index.html, on affiche juste
+    updateCounts();
+    if (selected.size > 0) renderSelected();
+    // Puis on rafraîchit pour avoir les adapters live
+    load();
 }
 
 // ── counts ────────────────────────────────────────
@@ -108,6 +110,7 @@ async function refresh() {
 async function load() {
     const res = await fetch('/adapters');
     cache = await res.json();
+    window.appState.cache = cache;
 
     const list = document.getElementById("list");
     list.innerHTML = "";

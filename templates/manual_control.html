@@ -1,0 +1,190 @@
+<!-- ── test page fragment ── -->
+
+<!-- header source : centré sur une ligne -->
+<div class="test-source-bar">
+    <button id="testSourceBtn" onclick="toggleSourcePanel()">All available</button>
+</div>
+
+<!-- liste des cartes -->
+<div id="testCardList" style="display:flex; flex-wrap:wrap; gap:16px; padding:4px 2px; margin-top:16px;"></div>
+<div id="testEmpty" class="drop-hint" style="display:none; margin-top:16px;">No adapters to display</div>
+
+<!-- panneau flottant source -->
+<div class="group-panel" id="sourcePanel">
+    <div class="group-panel-header">
+        <span class="group-panel-title">Select source</span>
+        <span class="group-close" onclick="closeSourcePanel()">✕</span>
+    </div>
+    <div class="group-panel-body">
+        <div class="group-list" id="sourceList"></div>
+    </div>
+</div>
+
+<script>
+let testAdapters = [];
+let testSource   = "available";
+
+function onPageLoad() {
+    renderFromSource(testSource);
+}
+
+// ── source panel ──────────────────────────────────
+function closeSourcePanel() {
+    document.getElementById("sourcePanel").classList.remove("visible");
+}
+
+async function toggleSourcePanel() {
+    const panel = document.getElementById("sourcePanel");
+    if (panel.classList.contains("visible")) { closeSourcePanel(); return; }
+
+    const btn  = document.getElementById("testSourceBtn");
+    const rect = btn.getBoundingClientRect();
+    panel.style.left  = rect.left + "px";
+    panel.style.right = "auto";
+    panel.style.top   = (rect.bottom + 8) + "px";
+    panel.classList.add("visible");
+
+    await refreshSourceList();
+}
+
+async function refreshSourceList() {
+    const container = document.getElementById("sourceList");
+    container.innerHTML = "";
+
+    const allCount = (window.appState.cache || []).length;
+    addSourceItem(container, "available", "All available", allCount, testSource === "available");
+
+    try {
+        const res   = await fetch("/groups");
+        const names = await res.json();
+        for (const name of names) {
+            const gres  = await fetch(`/groups/${encodeURIComponent(name)}`);
+            const gdata = await gres.json();
+            const count = (gdata.adapters || []).length;
+            addSourceItem(container, name, name, count, testSource === name, gdata);
+        }
+    } catch(e) {}
+
+    if (container.children.length === 0) {
+        container.innerHTML = '<div class="group-empty">No sources available</div>';
+    }
+}
+
+function addSourceItem(container, key, label, count, active, gdata) {
+    const item = document.createElement("div");
+    item.className = "group-item" + (active ? " source-active" : "");
+    item.innerHTML = `
+        <span class="group-item-name">${label}</span>
+        <span class="group-item-count">${count} adapter${count !== 1 ? "s" : ""}</span>`;
+    item.onclick = () => {
+        selectSource(key, gdata);
+        closeSourcePanel();
+    };
+    container.appendChild(item);
+}
+
+function selectSource(key, gdata) {
+    testSource = key;
+    document.getElementById("testSourceBtn").innerText =
+        key === "available" ? "All available" : key;
+    renderFromSource(key, gdata);
+}
+
+// ── render ────────────────────────────────────────
+async function renderFromSource(key, gdata) {
+    const cache = window.appState.cache || [];
+
+    let adapters = [];
+    if (key === "available") {
+        adapters = cache;
+    } else {
+        if (!gdata) {
+            try {
+                const r = await fetch(`/groups/${encodeURIComponent(key)}`);
+                gdata   = await r.json();
+            } catch(e) { gdata = { adapters: [] }; }
+        }
+        const serials = new Set((gdata.adapters || []).map(a => a.serialNumber));
+        adapters = cache.filter(a => serials.has(a.serialNumber));
+    }
+
+    testAdapters = adapters;
+    renderTestCards(adapters);
+}
+
+function renderTestCards(adapters) {
+    const container = document.getElementById("testCardList");
+    const empty     = document.getElementById("testEmpty");
+    container.innerHTML = "";
+
+    if (!adapters || adapters.length === 0) {
+        empty.style.display = "";
+        return;
+    }
+    empty.style.display = "none";
+
+    adapters.forEach(a => {
+        const isIP       = a.connectivityType !== "usb";
+        const isTTY      = a.ttyMode === true;  // ← TTY mode = empty connections
+        const typeLabel  = isIP && a.host ? a.host : (a.connectivityType || "?");
+        const typeClass  = isIP ? "pill-ip" : "pill-usb";
+        const boardLabel = a.boardLabel || "";
+        const descLabel  = a.label      || "";
+
+        const card = document.createElement("div");
+        card.className = "test-card";
+        card.innerHTML = `
+            <div class="test-card-header">
+                <div class="test-card-top">
+                    <div class="board-serial-line">
+                        <span class="board-serial">${a.serialNumber}</span>
+                        ${a.nickname ? `<span class="board-nickname"> — ${a.nickname}</span>` : ""}
+                    </div>
+                    <span class="pill ${typeClass}">${typeLabel}</span>
+                </div>
+                ${boardLabel ? `<div class="board-label">${boardLabel}</div>` : ""}
+                ${descLabel  ? `<div class="board-desc">${descLabel}</div>`   : ""}
+            </div>
+            <div class="test-card-buttons">
+                <button class="test-btn-full" data-serial="${a.serialNumber}" onclick="onCli(this)">CLI</button>
+                <div class="test-btn-row">
+                    <button class="test-btn-half ${isTTY ? 'test-btn-hidden' : ''}"
+                            data-serial="${a.serialNumber}" data-pb="1" onclick="onPb(this)">PB1</button>
+                    <button class="test-btn-half ${isTTY ? 'test-btn-hidden' : ''}"
+                            data-serial="${a.serialNumber}" data-pb="0" onclick="onPb(this)">PB0</button>
+                </div>
+            </div>`;
+        container.appendChild(card);
+    });
+}
+
+async function onCli(btn) {
+    const serial = btn.dataset.serial;
+    if (window.pywebview) {
+        window.pywebview.api.open_terminal(serial);
+    } else {
+        // fallback navigateur classique
+        window.open(`/terminal/${serial}`, `terminal_${serial}`, "width=820,height=520");
+    }
+}
+
+async function onPb(btn) {
+    const serial = btn.dataset.serial;
+    const pb     = btn.dataset.pb;
+    const label  = btn.innerText;
+    btn.innerText = "…";
+    btn.disabled  = true;
+    // TODO: appel API PB sur serial, bouton pb
+    await new Promise(r => setTimeout(r, 800));
+    btn.innerText = label;
+    btn.disabled  = false;
+}
+
+document.addEventListener("click", e => {
+    const panel = document.getElementById("sourcePanel");
+    if (!panel || !panel.classList.contains("visible")) return;
+    if (panel.contains(e.target)) return;
+    if (e.target.id === "testSourceBtn") return;
+    closeSourcePanel();
+});
+</script>
