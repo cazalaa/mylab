@@ -14,23 +14,62 @@ body {
 .topbar {
     display: flex;
     align-items: center;
-    height: 52px;
-    padding: 0 16px;
-    gap: 16px;
-    background: #f4f3f0;
-    border-bottom: 1px solid transparent;
+    justify-content: center;
+    height: 32px;
+    padding: 0 24px;
+    background: #EFF2F9;
+    border-bottom: none;
     transition: border-color .3s;
+    gap: 16px;
 }
 .topbar-actions {
-    margin-left: auto;
     display: flex;
-    gap: 8px;
+    gap: 12px;
     align-items: center;
 }
 
-.topbar.expanded { border-bottom-color: #e0dfd9; }
+.topbar.expanded { border-bottom: 1px solid #d0d5e0; }
 .app-title { font-size: 18px; font-weight: 500; letter-spacing: -.3px; flex-shrink: 0; }
 
+/* ── boutons neumorphiques ── */
+.topbar-actions button {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    height: 25px;
+    width: 120px;
+    padding: 0;
+    border: none;
+    border-radius: 14px;
+    background: #EFF2F9;
+    color: #6E7F8D;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow .2s, color .2s;
+    /* outer shadow — bouton en relief */
+    box-shadow:
+        -5px -5px 10px rgba(250, 251, 255, 1),
+         5px  5px 10px rgba(22, 27, 29, 0.23);
+}
+
+.topbar-actions button:hover {
+    color: #4a5a68;
+}
+
+/* bouton enfoncé (actif) */
+.topbar-actions button.open {
+    color: #4a5a68;
+    box-shadow:
+        inset -5px -5px 10px rgba(250, 251, 255, 1),
+        inset  5px  5px 10px rgba(22, 27, 29, 0.23);
+}
+
+/* SDM — bouton plus petit, pas de texte long */
+#btnSdm {
+    width: 120px;
+}
 /* ── toggle button ── */
 #toggleBtn {
     height: 32px;
@@ -56,28 +95,27 @@ body {
     max-height: 2000px;
     opacity: 1;
     padding: 20px 28px 28px;
-    height: calc(100vh - 82px);  /* ← 52 → 82 */
+    height: calc(100vh - 72px);  /* ← 52 → 82 */
     display: flex;
     flex-direction: column;
 }
 
 /* ── progress bar ── */
 .progress-wrap {
-    flex: 1;
     display: none;
     flex-direction: column;
-    gap: 4px;
-    min-width: 0;
+    gap: 2px;
+    padding: 0 24px 4px;
 }
 .progress-wrap.visible { display: flex; }
 .progress-label {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
+    font-size: 10px;
     color: #888;
     white-space: nowrap;
 }
 .progress-track {
-    height: 6px;
+    height: 3px;
     background: #e0dfd9;
     border-radius: 99px;
     overflow: hidden;
