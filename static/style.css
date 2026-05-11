@@ -2,7 +2,7 @@
 
 body {
     font-family: 'IBM Plex Sans', sans-serif;
-    background: #f4f3f0;
+    background: #EFF2F9;
     color: #1a1a1a;
     min-height: 100vh;
     padding: 0;
@@ -39,16 +39,17 @@ body {
 }
 
 /* ── boutons neumorphiques ── */
+.content-wrap.expanded { background: #EFF2F9; }
 
 .topbar-actions button {
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 12px;
     font-weight: 500;
-    height: 25px;
+    height: 28px;
     width: 120px;
     padding: 0;
     border: none;
-    border-radius: 14px;
+    border-radius: 8px;
     background: #EFF2F9;
     color: #6E7F8D;
     cursor: pointer;
@@ -84,7 +85,7 @@ body {
 /* ── toggle button ── */
 
 #toggleBtn {
-    height: 32px;
+    height: 28px;
     padding: 0 14px;
     border-radius: 8px;
     font-size: 12px;
@@ -98,6 +99,17 @@ body {
     border-color: #1a1a1a; 
 }
 
+#refreshBtn {
+    min-width: 70px;
+    justify-content: center;
+    text-align: center;
+}
+
+#refreshBtn, #allBtn, #eraseBtn, #fwBtn {
+    min-width: 90px;
+    justify-content: center;
+    text-align: center;
+}
 /* ── expandable content ── */
 
 .content-wrap {
@@ -157,32 +169,131 @@ body {
 
 /* ── buttons ── */
 
+/* ── boutons dans les panel headers ── */
+.panel-header button {
+    height: 26px;
+    font-size: 11px;
+    border-radius: 8px;
+}
+
+/* ── boutons dans les cartes manual control ── */
+.test-card-buttons button {
+    height: 28px;
+    font-size: 12px;
+    border-radius: 8px;
+}
+
+/* ── cartes neumorphiques ── */
+.test-card {
+    width: 250px;
+    background: #EFF2F9;
+    border: none;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow:
+        -6px -6px 12px rgba(250, 251, 255, 1),
+         6px  6px 12px rgba(22, 27, 29, 0.23);
+}
+
+.test-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 14px;
+    background: #EFF2F9;
+    border-bottom: 1px solid rgba(22, 27, 29, 0.08);
+}
+
+.test-card-buttons {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background: #EFF2F9;
+}
+
+.test-btn-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}
+
+.test-btn-half {
+    flex: 1;
+    border-radius: 8px;
+    border: none;
+    background: #EFF2F9;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6E7F8D;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow .15s, color .15s;
+    box-shadow:
+        -3px -3px 6px rgba(250, 251, 255, 1),
+         3px  3px 6px rgba(22, 27, 29, 0.23);
+}
+.test-btn-half:hover  { color: #4a5a68; }
+.test-btn-half:active {
+    color: #4a5a68;
+    box-shadow:
+        inset -3px -3px 6px rgba(250, 251, 255, 1),
+        inset  3px  3px 6px rgba(22, 27, 29, 0.23);
+}
+.test-btn-half:disabled { opacity: .45; pointer-events: none; }
+
+.test-btn-hidden { visibility: hidden; }
+
 button {
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 12px;
     font-weight: 500;
     height: 28px;
-    padding: 0 10px;
-    border: 1px solid #d0cfc9;
-    border-radius: 7px;
-    background: #fff;
-    color: #1a1a1a;
+    padding: 0 14px;
+    border: none;
+    border-radius: 10px;
+    background: #EFF2F9;
+    color: #6E7F8D;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    transition: background .15s, border-color .15s, transform .1s;
+    transition: box-shadow .15s, color .15s, transform .1s;
     white-space: nowrap;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
 }
-
-button:hover    { background: #ece9e3; border-color: #b0afa9; }
+button:hover    { color: #4a5a68; }
 button:active   { transform: scale(.97); }
 button:disabled { opacity: .45; pointer-events: none; }
-button.icon-only { width: 28px; padding: 0; justify-content: center; font-size: 13px; }
-button.primary  { background: #1a1a1a; color: #f4f3f0; border-color: #1a1a1a; }
-button.primary:hover { background: #333; }
-button.success  { background: #1D9E75; color: #E1F5EE; border-color: #1D9E75; }
-button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
+button.icon-only { width: 34px; padding: 0; justify-content: center; }
+button.primary,
+button.open {
+    color: #4a5a68;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+button.primary:hover { color: #2a3a48; }
+button.success {
+    color: #1D9E75;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+button.error {
+    color: #E24B4A;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.23);
+}
 
 /* ── grid ── */
 
@@ -197,22 +308,22 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 /* ── panels ── */
 
 .panel {
-    background: #fff;
-    border: 1px solid #e0dfd9;
-    border-radius: 14px;
+    background: #EFF2F9;
+    border: none;
+    border-radius: 16px;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
+    box-shadow:
+        -8px -8px 16px rgba(250, 251, 255, 1),
+         8px  8px 16px rgba(22, 27, 29, 0.23);
 }
 
 .panel-header {
     padding: 9px 12px;
-    border-bottom: 1px solid #e0dfd9;
+    border-bottom: 1px solid rgba(22, 27, 29, 0.08);
     display: flex;
     align-items: center;
     gap: 6px;
-    background: #faf9f7;
+    background: #EFF2F9;
 }
 
 .panel-title {
@@ -227,8 +338,8 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 .panel-count {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
-    background: #555;
-    color: #f4f3f0;
+    background: #6E7F8D;
+    color: #EFF2F9;
     padding: 1px 7px;
     border-radius: 20px;
     flex-shrink: 0;
@@ -236,38 +347,40 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 
 .panel-spacer { flex: 1; }
 
-.btn-sep { 
-    width: 1px; 
-    height: 18px; 
-    background: #e0dfd9; 
-    flex-shrink: 0; 
+.btn-sep {
+    width: 1px;
+    height: 18px;
+    background: rgba(22, 27, 29, 0.12);
+    flex-shrink: 0;
 }
 
 .panel-body {
     padding: 10px;
-    flex: 1;
-    overflow-y: auto;
-    min-height: 0;
+    min-height: 120px;
+    background: #EFF2F9;
 }
 
 /* ── board cards (available) ── */
 
 .board-card {
-    border: 1px solid #e0dfd9;
-    border-radius: 10px;
+    border: none;
+    border-radius: 12px;
     padding: 10px 12px;
     margin-bottom: 8px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     cursor: grab;
-    transition: border-color .15s, box-shadow .15s;
-    background: #fff;
+    background: #EFF2F9;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
+    transition: box-shadow .15s;
 }
-
-.board-card:hover { 
-    border-color: #aaa; 
-    box-shadow: 0 2px 8px rgba(0,0,0,.06); 
+.board-card:hover {
+    box-shadow:
+        -6px -6px 12px rgba(250, 251, 255, 1),
+         6px  6px 12px rgba(22, 27, 29, 0.28);
 }
 
 .board-card:last-child { margin-bottom: 0; }
@@ -342,24 +455,24 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 /* ── selected cards ── */
 
 .sel-card {
-    border: 1px solid #e0dfd9;
-    border-radius: 10px;
+    border: none;
+    border-radius: 12px;
     padding: 9px 12px;
     margin-bottom: 8px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: #fff;
+    background: #EFF2F9;
     position: relative;
     transition: opacity .2s;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
 }
+.sel-card.running { opacity: .5; pointer-events: none; }
 
 .sel-card:last-child { margin-bottom: 0; }
 
-.sel-card.running { 
-    opacity: .5; 
-    pointer-events: none; 
-}
 
 .sel-serial {
     font-family: 'IBM Plex Mono', monospace;
@@ -384,25 +497,28 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 }
 
 .remove-btn {
-    width: 20px; 
-    height: 20px; 
-    padding: 0; 
-    border-radius: 5px;
-    border: 1px solid #e0dfd9; 
-    background: #faf9f7;
-    font-size: 11px; 
-    color: #999; 
+    width: 22px; height: 22px;
+    padding: 0;
+    border-radius: 6px;
+    border: none;
+    background: #EFF2F9;
+    font-size: 11px;
+    color: #999;
     cursor: pointer;
-    display: inline-flex; 
-    align-items: center; 
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    transition: background .15s, color .15s;
+    box-shadow:
+        -2px -2px 4px rgba(250, 251, 255, 1),
+         2px  2px 4px rgba(22, 27, 29, 0.23);
+    transition: color .15s, box-shadow .15s;
 }
 
-.remove-btn:hover { 
-    background: #FCEBEB; 
-    color: #A32D2D; 
-    border-color: #F09595; 
+.remove-btn:hover {
+    color: #E24B4A;
+    box-shadow:
+        inset -2px -2px 4px rgba(250, 251, 255, 1),
+        inset  2px  2px 4px rgba(22, 27, 29, 0.23);
 }
 
 /* ── card status ── */
@@ -439,10 +555,11 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 .drop-hint {
     text-align: center;
     font-size: 12px;
-    color: #bbb;
+    color: #b5bfc6;
     padding: 28px 0;
-    border: 1.5px dashed #ddd;
-    border-radius: 10px;
+    border: 1.5px dashed rgba(22, 27, 29, 0.12);
+    border-radius: 12px;
+    background: #EFF2F9;
 }
 
 .panel-body.drag-over { background: #f0f8f5; }
@@ -510,7 +627,7 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     border: 1px solid #d0cfc9; 
-    border-radius: 7px;
+    border-radius: 8px;
     background: #faf9f7; 
     color: #1a1a1a; 
     outline: none;
@@ -663,53 +780,48 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
 }
 
 #testSourceBtn {
-    height: 32px;
+    height: 28px;
     padding: 0 20px;
     border-radius: 20px;
     font-size: 12px;
     font-weight: 500;
-    background: #1a1a1a;
-    color: #f4f3f0;
-    border: 1px solid #1a1a1a;
+    background: #EFF2F9;
+    color: #6E7F8D;
+    border: none;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    transition: background .15s;
+    transition: box-shadow .2s, color .2s;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
 }
-
-#testSourceBtn::before {
-    content: "▾";
-    font-size: 10px;
-    opacity: .7;
-}
-
-#testSourceBtn:hover { 
-    background: #333; 
-}
+#testSourceBtn::before { content: "▾"; font-size: 10px; opacity: .7; }
+#testSourceBtn:hover   { color: #4a5a68; }
 
 /* source active dans le panneau */
-
 .group-item.source-active {
     background: #f0f8f5;
     border-color: #1D9E75;
 }
-
 .group-item.source-active .group-item-name {
     color: #1D9E75;
     font-weight: 500;
 }
 
-/* ── test cards ── */
-
+/* ── test cards neumorphiques ── */
 .test-card {
     width: 250px;
-    background: #fff;
-    border: 1px solid #e0dfd9;
-    border-radius: 12px;
+    background: #EFF2F9;
+    border: none;
+    border-radius: 16px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    box-shadow:
+        -6px -6px 12px rgba(250, 251, 255, 1),
+         6px  6px 12px rgba(22, 27, 29, 0.23);
 }
 
 .test-card-header {
@@ -717,8 +829,8 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
     flex-direction: column;
     gap: 3px;
     padding: 12px 14px;
-    background: #faf9f7;
-    border-bottom: 1px solid #e0dfd9;
+    background: #EFF2F9;
+    border-bottom: 1px solid rgba(22, 27, 29, 0.08);
 }
 
 .test-card-top {
@@ -737,41 +849,13 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
     width: 0;
 }
 
-/* séparateur + centrage des boutons */
-
 .test-card-buttons {
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    background: #fff;
-}
-
-.test-btn-full:hover  { 
-    background: #ece9e3; 
-    border-color: #b0afa9; 
-}
-
-.test-btn-full:active { 
-    transform: scale(.97); 
-}
-
-.test-btn-full {
-    width: 100%;
-    height: 34px;
-    border-radius: 8px;
-    border: 1px solid #d0cfc9;
-    background: #fff;
-    font-family: 'IBM Plex Sans', sans-serif;
-    font-size: 12px;
-    font-weight: 500;
-    color: #1a1a1a;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background .15s, border-color .15s, transform .1s;
+    background: #EFF2F9;
 }
 
 .test-btn-row {
@@ -784,33 +868,31 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
     flex: 1;
     height: 34px;
     border-radius: 8px;
-    border: 1px solid #d0cfc9;
-    background: #fff;
+    border: none;
+    background: #EFF2F9;
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 12px;
     font-weight: 500;
-    color: #1a1a1a;
+    color: #6E7F8D;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background .15s, border-color .15s, transform .1s;
+    transition: box-shadow .15s, color .15s;
+    box-shadow:
+        -3px -3px 6px rgba(250, 251, 255, 1),
+         3px  3px 6px rgba(22, 27, 29, 0.23);
 }
+.test-btn-half:hover  { color: #4a5a68; }
+.test-btn-half:active {
+    color: #4a5a68;
+    box-shadow:
+        inset -3px -3px 6px rgba(250, 251, 255, 1),
+        inset  3px  3px 6px rgba(22, 27, 29, 0.23);
+}
+.test-btn-half:disabled { opacity: .45; pointer-events: none; }
 
-.test-btn-half:hover  { 
-    background: #ece9e3; 
-    border-color: #b0afa9; 
-}
-
-.test-btn-half:active { 
-    transform: scale(.97); 
-}
-
-.test-btn-half:disabled,
-.test-btn-full:disabled { 
-    opacity: .45; 
-    pointer-events: none; 
-}
+.test-btn-hidden { visibility: hidden; }
 
 .board-desc {
     font-size: 11px;
@@ -818,8 +900,4 @@ button.error    { background: #E24B4A; color: #fff;    border-color: #E24B4A; }
     margin-top: 1px;
     word-break: break-word;
     overflow-wrap: break-word;
-}
-
-.test-btn-hidden {
-    visibility: hidden;  /* hidden not display:none — keeps the height */
 }

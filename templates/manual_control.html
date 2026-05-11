@@ -1,4 +1,88 @@
-<!-- ── test page fragment ── -->
+<!-- ── manual control page fragment ── -->
+<style>
+/* ── source button neumorphique ── */
+#testSourceBtn {
+    height: 36px;
+    padding: 0 20px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #EFF2F9;
+    color: #6E7F8D;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: box-shadow .2s, color .2s;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+#testSourceBtn::before { content: "▾"; font-size: 10px; opacity: .7; }
+#testSourceBtn:hover   { color: #4a5a68; }
+
+/* ── card buttons neumorphiques ── */
+.test-card-buttons {
+    padding: 14px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: #EFF2F9;
+}
+
+.test-btn-half {
+    flex: 1;
+    height: 34px;
+    border-radius: 10px;
+    border: none;
+    background: #EFF2F9;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6E7F8D;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow .15s, color .15s;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+.test-btn-half:hover  { color: #4a5a68; }
+.test-btn-half:active {
+    color: #4a5a68;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+.test-btn-half:disabled { opacity: .45; pointer-events: none; }
+.test-btn-hidden { visibility: hidden; }
+
+/* card background neumorphique */
+.test-card {
+    width: 250px;
+    background: #EFF2F9;
+    border: none;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow:
+        -8px -8px 16px rgba(250, 251, 255, 1),
+         8px  8px 16px rgba(22, 27, 29, 0.23);
+}
+.test-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 14px;
+    background: #EFF2F9;
+    border-bottom: 1px solid rgba(22, 27, 29, 0.08);
+}
+</style>
 
 <!-- header source : centré sur une ligne -->
 <div class="test-source-bar">
@@ -146,15 +230,26 @@ function renderTestCards(adapters) {
                 ${descLabel  ? `<div class="board-desc">${descLabel}</div>`   : ""}
             </div>
             <div class="test-card-buttons">
-                <button class="test-btn-full" data-serial="${a.serialNumber}" onclick="onCli(this)">CLI</button>
+                <div class="test-btn-row">
+                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onCli(this)">Cli</button>
+                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onReset(this)">Reset</button>
+                </div>
                 <div class="test-btn-row">
                     <button class="test-btn-half ${isTTY ? 'test-btn-hidden' : ''}"
-                            data-serial="${a.serialNumber}" data-pb="1" onclick="onPb(this)">PB1</button>
+                            data-serial="${a.serialNumber}" data-pb="1" onclick="onPb(this)">Pb1</button>
                     <button class="test-btn-half ${isTTY ? 'test-btn-hidden' : ''}"
-                            data-serial="${a.serialNumber}" data-pb="0" onclick="onPb(this)">PB0</button>
+                            data-serial="${a.serialNumber}" data-pb="0" onclick="onPb(this)">Pb0</button>
                 </div>
             </div>`;
         container.appendChild(card);
+    });
+}
+
+async function sendAdminCommand(serial, cmd) {
+    await fetch(`/api/adapter/${serial}/admin-cmd`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cmd })
     });
 }
 
@@ -166,6 +261,33 @@ async function onCli(btn) {
         // fallback navigateur classique
         window.open(`/terminal/${serial}`, `terminal_${serial}`, "width=820,height=520");
     }
+    await new Promise(r => setTimeout(r, 1000));
+    const label  = btn.innerText;
+    btn.innerText = "…";
+    btn.disabled  = true;
+    await sendAdminCommand(serial, "target button enable");
+    btn.innerText = "✓";
+    btn.classList.add("success");
+    setTimeout(() => {
+        btn.classList.remove("success");
+        btn.innerText = label;
+        btn.disabled  = false;
+    }, 2000);
+}
+
+async function onReset(btn) {
+    const serial = btn.dataset.serial;
+    const label  = btn.innerText;
+    btn.innerText = "…";
+    btn.disabled  = true;
+    await sendAdminCommand(serial, "target reset 100");
+    btn.innerText = "✓";
+    btn.classList.add("success");
+    setTimeout(() => {
+        btn.classList.remove("success");
+        btn.innerText = label;
+        btn.disabled  = false;
+    }, 2000);
 }
 
 async function onPb(btn) {
@@ -174,10 +296,16 @@ async function onPb(btn) {
     const label  = btn.innerText;
     btn.innerText = "…";
     btn.disabled  = true;
-    // TODO: appel API PB sur serial, bouton pb
-    await new Promise(r => setTimeout(r, 800));
-    btn.innerText = label;
-    btn.disabled  = false;
+    await sendAdminCommand(serial, `target button press ${pb}`);
+    await new Promise(r => setTimeout(r, 100));
+    await sendAdminCommand(serial, `target button release ${pb}`);
+    btn.innerText = "✓";
+    btn.classList.add("success");
+    setTimeout(() => {
+        btn.classList.remove("success");
+        btn.innerText = label;
+        btn.disabled  = false;
+    }, 2000);
 }
 
 document.addEventListener("click", e => {

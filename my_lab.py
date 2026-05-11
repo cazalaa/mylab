@@ -19,7 +19,7 @@ GROUPS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Dimensions
 WIN_W          = 800
-WIN_COLLAPSED  = 72    # hauteur barre compacte
+WIN_COLLAPSED  = 65   # hauteur barre compacte
 WIN_EXPANDED   = 700   # hauteur dépliée
 
 from binresolve import resolve_sdm, resolve_commander
@@ -450,6 +450,19 @@ def handle_terminal_input(data):
                 tn.write(data["data"].encode("utf-8"))
         except Exception as e:
             emit("terminal_error", {"message": str(e)})
+
+@app.route("/api/adapter/<serial>/admin-cmd", methods=["POST"])
+def admin_cmd(serial):
+    cmd  = request.json.get("cmd", "")
+    room = f"{serial}_admin"
+    tn   = active_telnets.get(room)
+    if not tn:
+        return jsonify({"ok": False, "error": "not connected"}), 400
+    try:
+        tn.sendall((cmd + "\r\n").encode("utf-8"))
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 # ----------------------------
 if __name__ == "__main__":
     ensure_sdm()
