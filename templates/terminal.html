@@ -12,8 +12,8 @@
 
 body {
     font-family: 'IBM Plex Sans', sans-serif;
-    background: #1a1a1a;
-    color: #f4f3f0;
+    background: #EFF2F9;
+    color: #4a5a68;
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -26,17 +26,16 @@ body {
     align-items: center;
     gap: 12px;
     padding: 10px 16px;
-    background: #222;
-    border-bottom: 1px solid #333;
+    background: #EFF2F9;
     flex-shrink: 0;
 }
 .term-serial {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 13px;
     font-weight: 500;
-    color: #f4f3f0;
+    color: #4a5a68;
 }
-.term-label { font-size: 11px; color: #888; }
+.term-label { font-size: 11px; color: #8899aa; }
 .term-host {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
@@ -47,28 +46,40 @@ body {
 /* ── tabs ── */
 .term-tabs {
     display: flex;
-    background: #1a1a1a;
-    border-bottom: 1px solid #333;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 16px 10px;
+    background: #EFF2F9;
     flex-shrink: 0;
 }
 .term-tab {
-    padding: 8px 20px;
+    padding: 6px 20px;
     font-size: 12px;
     font-weight: 500;
-    color: #666;
+    color: #6E7F8D;
     cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: color .15s, border-color .15s;
+    border-radius: 10px;
+    border: none;
+    background: #EFF2F9;
+    transition: box-shadow .2s, color .2s;
     user-select: none;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
 }
-.term-tab:hover  { color: #aaa; }
-.term-tab.active { color: #f4f3f0; border-bottom-color: #1D9E75; }
+.term-tab:hover { color: #4a5a68; }
+.term-tab.active {
+    color: #4a5a68;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.23);
+}
 
 .term-tab-status {
     display: inline-block;
     width: 6px; height: 6px;
     border-radius: 50%;
-    background: #444;
+    background: #b5bfc6;
     margin-right: 6px;
     vertical-align: middle;
 }
@@ -82,34 +93,75 @@ body {
     min-height: 0;
     display: flex;
     flex-direction: column;
+    padding: 0 16px;
 }
 .term-pane {
     flex: 1;
     display: none;
-    padding: 8px;
     overflow: hidden;
     min-height: 0;
+    border-radius: 14px;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.18);
 }
 .term-pane.active { display: flex; flex-direction: column; }
 
 /* xterm fills the pane */
-.term-pane .xterm          { flex: 1; min-height: 0; }
-.term-pane .xterm-viewport { overflow-y: scroll !important; }
+.term-pane .xterm          { flex: 1; min-height: 0; border-radius: 14px; }
+.term-pane .xterm-viewport { overflow-y: scroll !important; border-radius: 14px; }
 
-/* scrollbar styling */
+/* scrollbar */
 .term-pane .xterm-viewport::-webkit-scrollbar       { width: 6px; }
-.term-pane .xterm-viewport::-webkit-scrollbar-track { background: #1a1a1a; }
-.term-pane .xterm-viewport::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
-.term-pane .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #666; }
+.term-pane .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.term-pane .xterm-viewport::-webkit-scrollbar-thumb { background: #b5bfc6; border-radius: 3px; }
+.term-pane .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6E7F8D; }
+
+/* ── action bar (Reset/PB) ── */
+.term-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #EFF2F9;
+    flex-shrink: 0;
+}
+.term-action-btn {
+    height: 32px;
+    width: 80px;
+    border-radius: 10px;
+    border: none;
+    background: #EFF2F9;
+    color: #6E7F8D;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow .15s, color .15s;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+.term-action-btn:hover  { color: #4a5a68; }
+.term-action-btn:active {
+    color: #4a5a68;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+.term-action-btn:disabled { opacity: .4; pointer-events: none; }
 
 /* ── input bar ── */
 .term-input-bar {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
-    background: #222;
-    border-top: 1px solid #333;
+    padding: 10px 16px 14px;
+    background: #EFF2F9;
     flex-shrink: 0;
 }
 .term-prompt {
@@ -120,27 +172,42 @@ body {
 }
 .term-input {
     flex: 1;
-    background: transparent;
+    height: 34px;
+    padding: 0 12px;
+    background: #EFF2F9;
     border: none;
+    border-radius: 10px;
     outline: none;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 13px;
-    color: #f4f3f0;
+    color: #4a5a68;
     caret-color: #1D9E75;
+    box-shadow:
+        inset -3px -3px 6px rgba(250, 251, 255, 1),
+        inset  3px  3px 6px rgba(22, 27, 29, 0.18);
 }
-.term-input::placeholder { color: #444; }
+.term-input::placeholder { color: #b5bfc6; }
 .term-send-btn {
-    background: transparent;
-    border: 1px solid #333;
-    border-radius: 5px;
-    color: #666;
-    font-size: 13px;
-    width: 28px; height: 28px;
+    width: 34px; height: 34px;
+    padding: 0;
+    border-radius: 10px;
+    border: none;
+    background: #EFF2F9;
+    color: #6E7F8D;
+    font-size: 14px;
     cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    transition: color .15s, border-color .15s;
+    transition: box-shadow .15s, color .15s;
+    box-shadow:
+        -3px -3px 6px rgba(250, 251, 255, 1),
+         3px  3px 6px rgba(22, 27, 29, 0.23);
 }
-.term-send-btn:hover { color: #f4f3f0; border-color: #666; }
+.term-send-btn:hover { color: #4a5a68; }
+.term-send-btn:active {
+    box-shadow:
+        inset -3px -3px 6px rgba(250, 251, 255, 1),
+        inset  3px  3px 6px rgba(22, 27, 29, 0.23);
+}
 </style>
 </head>
 <body>
@@ -172,6 +239,12 @@ body {
     <input type="text" id="termInput" class="term-input" 
            placeholder="Type command…" autocomplete="off" spellcheck="false"/>
     <button class="term-send-btn" onclick="sendCommand()">⏎</button>
+</div>
+
+<div class="term-action-bar" id="termActionBar" style="display:none">
+    <button class="term-action-btn" onclick="termCmd('target reset 100')">Reset</button>
+    <button class="term-action-btn" onclick="termPb(1)">PB1</button>
+    <button class="term-action-btn" onclick="termPb(0)">PB0</button>
 </div>
 
 <script>
@@ -386,6 +459,32 @@ function setStatus(kind, state) {
 
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
+function setStatus(kind, state) {
+    const el = document.getElementById(`status${cap(kind)}`);
+    if (el) el.className = `term-tab-status ${state}`;
+
+    // Afficher la barre d'actions si admin est connecté
+    if (kind === "admin") {
+        const bar = document.getElementById("termActionBar");
+        if (bar) bar.style.display = state === "connected" ? "flex" : "none";
+    }
+}
+
+async function termCmd(cmd) {
+    const room = `${serial}_admin`;
+    socket.emit("terminal_input", { room, data: cmd + "\r\n" });
+}
+
+async function termPb(pb) {
+    const btns = document.querySelectorAll(".term-action-btn");
+    btns.forEach(b => b.disabled = true);
+
+    await termCmd(`target button press ${pb}`);
+    await new Promise(r => setTimeout(r, 100));
+    await termCmd(`target button release ${pb}`);
+
+    btns.forEach(b => b.disabled = false);
+}
 // ── resize ────────────────────────────────────────
 window.addEventListener("resize", () => {
     const t = terminals[activeTab];
@@ -398,6 +497,7 @@ if (document.readyState === "loading") {
 } else {
     init();
 }
+
 </script>
 </body>
 </html>
