@@ -451,6 +451,7 @@ def handle_terminal_input(data):
         except Exception as e:
             emit("terminal_error", {"message": str(e)})
 
+
 @app.route("/api/adapter/<serial>/admin-cmd", methods=["POST"])
 def admin_cmd(serial):
     cmd  = request.json.get("cmd", "")
@@ -460,6 +461,10 @@ def admin_cmd(serial):
         return jsonify({"ok": False, "error": "not connected"}), 400
     try:
         tn.sendall((cmd + "\r\n").encode("utf-8"))
+        # Émettre la commande comme echo dans le terminal
+        socketio.emit("terminal_echo",
+                      {"data": f"{cmd}", "room": room},
+                      room=room)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
