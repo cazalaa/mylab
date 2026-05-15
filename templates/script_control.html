@@ -341,11 +341,10 @@ function renderScenarios(data) {
     const wrap = document.getElementById("scListWrap");
     wrap.innerHTML = "";
     if (!data || data.length === 0) {
-        wrap.innerHTML = '<div class="sc-hint">No scenarios found</div>';
+        wrap.innerHTML = '<div class="sc-hint">No directories found</div>';
         return;
     }
     data.forEach(({ dir, files }) => {
-        // Directory header — clickable in create mode
         const groupTitle = document.createElement("div");
         groupTitle.className = "sc-group-title" + (scMode === "create" ? " sc-dir-selectable" : "");
         groupTitle.innerText = dir;
@@ -354,6 +353,14 @@ function renderScenarios(data) {
             groupTitle.onclick = () => selectDirectory(dir);
         }
         wrap.appendChild(groupTitle);
+
+        if (files.length === 0 && scMode === "create") {
+            // Show empty hint under the dir in create mode
+            const hint = document.createElement("div");
+            hint.style.cssText = "font-size:10px; color:#b5bfc6; padding:2px 8px 4px;";
+            hint.innerText = "empty";
+            wrap.appendChild(hint);
+        }
 
         files.forEach(file => {
             const name = file.replace(/\.yaml$/, "");
@@ -366,7 +373,6 @@ function renderScenarios(data) {
             if (scMode === "load") {
                 item.onclick = () => selectScenario(item, key, name, dir, file);
             } else {
-                // In create mode: click scenario to copy it, click dir header to start fresh
                 item.onclick = () => copyScenario(item, key, name, dir);
             }
             wrap.appendChild(item);
@@ -396,12 +402,10 @@ async function selectScenario(el, key, name, dir, file) {
 function selectDirectory(dir) {
     scSelectedDir = dir;
     document.getElementById("scSelectedDirName").innerText = dir;
-    // Highlight selected dir header
     document.querySelectorAll(".sc-group-title").forEach(t =>
         t.classList.toggle("sc-dir-active", t.dataset.dir === dir));
     document.querySelectorAll(".sc-item").forEach(i =>
         i.classList.remove("sc-item-active"));
-    // Start from template
     document.getElementById("scYamlEditor").value = YAML_TEMPLATE;
     document.getElementById("scRightTitle").innerText = "New Scenario";
 }
@@ -432,8 +436,8 @@ async function newDirectory() {
             body: JSON.stringify({ base: scenariBaseDir, dir: name.trim() })
         });
         await loadScenarios();
-        // Auto-select the new directory
-        selectDirectory(name.trim());
+        // Auto-select after render
+        setTimeout(() => selectDirectory(name.trim()), 50);
     } catch(e) { console.error(e); }
 }
 

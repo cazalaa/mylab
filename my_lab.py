@@ -524,7 +524,7 @@ def admin_cmd(serial):
 
 @app.route("/api/scenarios")
 def list_scenarios():
-    base = request.args.get("dir", SCENARI_DIR)  # ← use absolute default
+    base = request.args.get("dir", SCENARI_DIR)
     base = os.path.abspath(base)
     result = []
     if not os.path.isdir(base):
@@ -535,8 +535,8 @@ def list_scenarios():
                 f.name for f in os.scandir(entry.path)
                 if f.is_file() and f.name.endswith(".yaml")
             ])
-            if files:
-                result.append({"dir": entry.name, "files": files})
+            # Include directory even if empty
+            result.append({"dir": entry.name, "files": files})
     return jsonify(result)
 
 @app.route("/api/scenario-content")
