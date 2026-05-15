@@ -14,8 +14,10 @@ import threading
 import glob as glob_module
 import serial.tools.list_ports 
 import pty, os, termios
+import yaml
 
 GROUPS_DIR = os.path.dirname(os.path.abspath(__file__))
+SCENARI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenari")
 
 # Dimensions
 WIN_W          = 800
@@ -217,24 +219,28 @@ def adapters():
         if not serial:
             continue
 
-        # Check if connections are empty → TTY mode
-        tty_mode = False
+        # Check ttyMode via get-info connections array
+        tty_mode = True
         try:
-            r2    = requests.get(f"{SDM_BASE}/api/adapter/{serial}/connections", timeout=2)
-            conns = r2.json()
-            tty_mode = not conns.get("serial1", {}).get("portNumber")
-        except:
-            pass
+            r2      = requests.get(f"{SDM_BASE}/api/adapter/{serial}/get-info", timeout=2)
+            info    = r2.json()
+            conns   = info.get("connections", [])
+            ports   = {c["portName"]: c["portNumber"] for c in conns}
+            tty_mode = not ports.get("serial1")
+            print(f"[INFO] get-info {ports}")
+        except Exception as e:
+            print(f"[WARN] get-info {serial}: {e}")
+            tty_mode = False  # safe fallback — show buttons
 
         result.append({
-            "serialNumber":   serial,
-            "boardId":        extract_board(a),
-            "boardLabel":     extract_board_label(a),
+            "serialNumber":     serial,
+            "boardId":          extract_board(a),
+            "boardLabel":       extract_board_label(a),
             "connectivityType": a.get("connectivityType"),
-            "host":           a.get("host"),
-            "label":          a.get("label", ""),
-            "nickname":       a.get("nickname", ""),
-            "ttyMode":        tty_mode,
+            "host":             a.get("host"),
+            "label":            a.get("label", ""),
+            "nickname":         a.get("nickname", ""),
+            "ttyMode":          tty_mode,
         })
 
     return jsonify(result)
@@ -243,6 +249,12 @@ def adapters():
 class WindowAPI:
     def set_height(self, height):
         webview.windows[0].resize(WIN_W, height)
+
+    def pick_directory(self):
+        result = webview.windows[0].create_file_dialog(
+            webview.FOLDER_DIALOG
+        )
+        return result[0] if result else None
 
     def open_terminal(self, serial):
         """Appelé depuis le JS via pywebview.api.open_terminal(serial)"""
@@ -281,17 +293,17 @@ def terminal_info(serial):
         connectivity = adapter.get("connectivityType", "usb")
         host = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
 
-        # Ports dynamiques via /connections
-        r2    = requests.get(f"{SDM_BASE}/api/adapter/{serial}/connections", timeout=3)
-        conns = r2.json()
+        # connections is a list: [{"portName": "serial1", "portNumber": 4901, ...}, ...]
+        conns_list = data.get("connections", [])
+        ports      = {c["portName"]: c["portNumber"] for c in conns_list}
 
-        vcom_port  = conns.get("serial1", {}).get("portNumber")
-        admin_port = conns.get("admin",   {}).get("portNumber")
+        vcom_port  = ports.get("serial1")
+        admin_port = ports.get("admin")
+        print(f"[INFO] terminal-info {serial}: vcom={vcom_port} admin={admin_port}")
 
         # Si pas de ports réseau → chercher TTY USB
         tty_path = None
         if not vcom_port and connectivity == "usb":
-            # Chercher /dev/tty.usbmodem* ou /dev/cu.usbmodem* contenant le serial
             candidates = (
                 glob_module.glob("/dev/tty.usbmodem*") +
                 glob_module.glob("/dev/cu.usbmodem*")
@@ -300,7 +312,6 @@ def terminal_info(serial):
                 if serial.lower() in c.lower():
                     tty_path = c
                     break
-            # Fallback: chercher via pyserial
             if not tty_path:
                 for port in serial_tools.list_ports.comports():
                     if serial.lower() in (port.serial_number or "").lower():
@@ -312,7 +323,7 @@ def terminal_info(serial):
             "host":         host,
             "vcom":         vcom_port,
             "admin":        admin_port,
-            "tty":          tty_path,   # None si ethernet/réseau
+            "tty":          tty_path,
             "connectivity": connectivity,
             "label":        adapter.get("label", serial),
             "nickname":     adapter.get("nickname", ""),
@@ -457,17 +468,125 @@ def admin_cmd(serial):
     cmd  = request.json.get("cmd", "")
     room = f"{serial}_admin"
     tn   = active_telnets.get(room)
+
     if not tn:
-        return jsonify({"ok": False, "error": "not connected"}), 400
+        # Try to connect on demand using terminal-info
+        try:
+            r     = requests.get(f"{SDM_BASE}/api/adapter/{serial}/get-info", timeout=3)
+            data  = r.json()
+            adapter = data.get("adapter", {})
+            conns   = data.get("connections", [])
+            ports   = {c["portName"]: c["portNumber"] for c in conns}
+
+            connectivity = adapter.get("connectivityType", "usb")
+            host = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
+            port = ports.get("admin")
+
+            if not port:
+                return jsonify({"ok": False, "error": "no admin port available"}), 400
+
+            tn = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
+            tn.settimeout(5)
+            tn.connect((host, port))
+            tn.settimeout(None)
+            active_telnets[room] = tn
+
+            # Start reader thread
+            def reader():
+                while True:
+                    try:
+                        chunk = tn.recv(4096)
+                        if not chunk:
+                            break
+                        socketio.emit("terminal_output",
+                                      {"data": chunk.decode("utf-8", errors="replace"), "room": room},
+                                      room=room)
+                    except Exception:
+                        break
+                active_telnets.pop(room, None)
+
+            threading.Thread(target=reader, daemon=True).start()
+            print(f"[INFO] admin-cmd: auto-connected to {host}:{port} for {serial}")
+
+        except Exception as e:
+            print(f"[ERROR] admin-cmd connect failed {serial}: {e}")
+            return jsonify({"ok": False, "error": f"not connected and auto-connect failed: {str(e)}"}), 400
+
     try:
         tn.sendall((cmd + "\r\n").encode("utf-8"))
-        # Émettre la commande comme echo dans le terminal
         socketio.emit("terminal_echo",
-                      {"data": f"{cmd}", "room": room},
+                      {"data": f"› {cmd}", "room": room},
                       room=room)
         return jsonify({"ok": True})
     except Exception as e:
+        active_telnets.pop(room, None)
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/scenarios")
+def list_scenarios():
+    base = request.args.get("dir", SCENARI_DIR)  # ← use absolute default
+    base = os.path.abspath(base)
+    result = []
+    if not os.path.isdir(base):
+        return jsonify(result)
+    for entry in sorted(os.scandir(base), key=lambda e: e.name):
+        if entry.is_dir():
+            files = sorted([
+                f.name for f in os.scandir(entry.path)
+                if f.is_file() and f.name.endswith(".yaml")
+            ])
+            if files:
+                result.append({"dir": entry.name, "files": files})
+    return jsonify(result)
+
+@app.route("/api/scenario-content")
+def scenario_content():
+    base = request.args.get("dir", SCENARI_DIR)  # ← use absolute default
+    path = request.args.get("path", "")
+    base = os.path.abspath(base)
+    full = os.path.abspath(os.path.join(base, path))
+    if not full.startswith(base):
+        return jsonify({"error": "invalid path"}), 400
+    if not os.path.isfile(full):
+        return jsonify({"error": "file not found"}), 404
+    with open(full, "r") as f:
+        return jsonify({"content": f.read()})
+
+@app.route("/api/scenarios-default")
+def scenarios_default():
+    return jsonify({"path": SCENARI_DIR})
+
+@app.route("/api/scenario-mkdir", methods=["POST"])
+def scenario_mkdir():
+    base = request.json.get("base", SCENARI_DIR)
+    dir_name = request.json.get("dir", "").strip()
+    if not dir_name:
+        return jsonify({"error": "empty name"}), 400
+    base = os.path.abspath(base)
+    full = os.path.abspath(os.path.join(base, dir_name))
+    if not full.startswith(base):
+        return jsonify({"error": "invalid path"}), 400
+    os.makedirs(full, exist_ok=True)
+    return jsonify({"ok": True})
+
+@app.route("/api/scenario-save", methods=["POST"])
+def scenario_save():
+    base    = request.json.get("base", SCENARI_DIR)
+    dir_name = request.json.get("dir", "").strip()
+    name    = request.json.get("name", "").strip()
+    content = request.json.get("content", "")
+    if not dir_name or not name:
+        return jsonify({"error": "missing dir or name"}), 400
+    base = os.path.abspath(base)
+    full = os.path.abspath(os.path.join(base, dir_name, name + ".yaml"))
+    if not full.startswith(base):
+        return jsonify({"error": "invalid path"}), 400
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w") as f:
+        f.write(content)
+    return jsonify({"ok": True})
+
+    
 # ----------------------------
 if __name__ == "__main__":
     ensure_sdm()
