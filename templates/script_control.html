@@ -32,22 +32,76 @@
         <div class="sc-panel-header">
             <span class="sc-panel-title" id="scRightTitle">Content</span>
             <div class="panel-spacer"></div>
-            <!-- Create mode buttons -->
+            <button class="sc-browse-btn" id="scAddBoardBtn" onclick="openBoardForm()" style="display:none">+ Board</button>
             <button class="sc-browse-btn" id="scFromGroupBtn" onclick="toggleGroupPicker()" style="display:none">From group</button>
             <button class="sc-browse-btn" id="scSaveBtn" onclick="saveScenario()" style="display:none">Save…</button>
         </div>
-        <!-- selected dir indicator (create mode) -->
         <div id="scSelectedDir" style="display:none" class="sc-dir-path">
             <span style="color:#8899aa">Directory: </span><span id="scSelectedDirName" style="color:#185FA5">— none selected —</span>
         </div>
-        <!-- Load mode: view -->
         <div class="sc-yaml-wrap" id="scYamlView">
             <div class="sc-hint">Select a scenario to view its content</div>
         </div>
-        <!-- Create mode: editor -->
-        <textarea id="scYamlEditor" class="sc-yaml-editor" spellcheck="false" style="display:none; flex:1; margin:10px;"></textarea>
+        <div id="scCheckReport" style="display:none" class="sc-check-report">
+            <div class="sc-check-header" id="scCheckHeader"></div>
+            <div class="sc-check-list" id="scCheckList"></div>
+        </div>
+        <textarea id="scYamlEditor" class="sc-yaml-editor" spellcheck="false"
+            style="display:none; flex:1; margin:10px;"
+            oninput="if(typeof onEditorInput==='function'){onEditorInput();}"></textarea>
     </div>
 
+</div>
+
+<div id="boardFormOverlay" style="display:none; position:fixed; inset:0; background:rgba(22,27,29,0.35); z-index:200; align-items:center; justify-content:center;">
+    <div class="sc-board-form">
+        <div class="sc-board-form-header">
+            <span class="sc-panel-title">Add board entry</span>
+            <span class="group-close" onclick="closeBoardForm()">✕</span>
+        </div>
+        <div class="sc-board-form-body">
+            <div class="sc-form-row">
+                <label class="sc-form-label">Adapter</label>
+                <select id="bfAdapter" class="sc-select" onchange="onAdapterSelect(this.value)">
+                    <option value="">— pre-fill from adapter —</option>
+                </select>
+            </div>
+            <div class="sc-form-row">
+                <label class="sc-form-label">Board ID</label>
+                <input id="bfBoard" class="sc-form-input" type="text" placeholder="e.g. BRD4162A" />
+            </div>
+            <div class="sc-form-row">
+                <label class="sc-form-label">JLink / IP</label>
+                <input id="bfJlink" class="sc-form-input" type="text" placeholder="IP address or serial number" />
+            </div>
+            <div class="sc-form-row">
+                <label class="sc-form-label">Options</label>
+                <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                    <label class="sc-form-check"><input type="checkbox" id="bfMasserase" checked> masserase</label>
+                    <label class="sc-form-check"><input type="checkbox" id="bfHaltReset" checked> halt_reset</label>
+                    <label class="sc-form-check"><input type="checkbox" id="bfOpenTerm" checked> open_terminal</label>
+                </div>
+            </div>
+            <div class="sc-form-row">
+                <label class="sc-form-label">S37 files</label>
+                <div style="display:flex; flex-direction:column; gap:6px; flex:1; min-width:0;">
+                    <div id="bfS37List" style="display:flex; flex-direction:column; gap:4px;"></div>
+                    <button class="sc-browse-btn" onclick="addS37File()">+ Add s37…</button>
+                </div>
+            </div>
+            <div class="sc-form-row">
+                <label class="sc-form-label">Script</label>
+                <div style="display:flex; gap:8px; flex:1; align-items:center; min-width:0;">
+                    <input id="bfScript" class="sc-form-input" type="text" placeholder="optional" style="flex:1;" />
+                    <button class="sc-browse-btn" onclick="browseScript()">Browse…</button>
+                </div>
+            </div>
+        </div>
+        <div class="sc-board-form-footer">
+            <button class="sc-browse-btn" onclick="closeBoardForm()">Cancel</button>
+            <button class="sc-browse-btn" onclick="appendBoard()" style="color:#1D9E75; font-weight:500;">Add board</button>
+        </div>
+    </div>
 </div>
 
 <!-- floating group picker -->
@@ -60,7 +114,18 @@
         <div class="group-list" id="scGroupList"></div>
     </div>
 </div>
-
+<div id="scCheckPopup" style="display:none; position:fixed; inset:0; background:rgba(22,27,29,0.35); z-index:200; align-items:center; justify-content:center;">
+    <div class="sc-board-form" style="max-width:520px;">
+        <div class="sc-board-form-header">
+            <span id="scCheckPopupTitle" class="sc-panel-title">Check report</span>
+            <span class="group-close" onclick="document.getElementById('scCheckPopup').style.display='none'">✕</span>
+        </div>
+        <div class="sc-board-form-body" id="scCheckPopupBody" style="gap:6px;"></div>
+        <div class="sc-board-form-footer">
+            <button class="sc-browse-btn" onclick="document.getElementById('scCheckPopup').style.display='none'">Close</button>
+        </div>
+    </div>
+</div>
 <style>
 .sc-grid {
     display: grid;
@@ -258,13 +323,166 @@
 .sc-list-wrap::-webkit-scrollbar-thumb,
 .sc-yaml-wrap::-webkit-scrollbar-thumb,
 .sc-yaml-editor::-webkit-scrollbar-thumb { background: #b5bfc6; border-radius: 3px; }
-</style>
 
+
+.sc-line-error {
+    background: rgba(226, 75, 74, 0.12);
+    border-left: 3px solid #E24B4A;
+    padding-left: 4px;
+    margin-left: -4px;
+    color: inherit;
+    display: inline;
+    width: 100%;
+}
+
+pre.sc-yaml-content mark.sc-line-error {
+    background: rgba(226, 75, 74, 0.12);
+    border-left: 3px solid #E24B4A;
+    padding-left: 4px;
+    margin-left: -4px;
+    color: inherit;
+    /* key: don't make it block, let pre handle line breaks */
+    display: inline;
+    white-space: pre;
+}
+/* ── check report ── */
+.sc-check-report {
+    margin: 10px;
+    border-radius: 12px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.sc-check-header {
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 500;
+}
+.sc-check-header.ok      { background: #EAF3DE; color: #3B6D11; border-radius: 12px; }
+.sc-check-header.ok-alone{ border-radius: 12px; }
+.sc-check-header.err     { background: #FCEBEB; color: #A32D2D; border-radius: 12px 12px 0 0; }
+.sc-check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    background: #FCEBEB;
+    border-radius: 0 0 12px 12px;
+}
+.sc-check-item {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #A32D2D;
+    padding: 4px 8px;
+    background: rgba(255,255,255,.5);
+    border-radius: 6px;
+}
+.sc-check-line {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    background: rgba(162,45,45,.15);
+    color: #A32D2D;
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-right: 6px;
+}
+
+
+/* ── board form popup ── */
+.sc-board-form {
+    background: #EFF2F9;
+    border-radius: 16px;
+    width: 480px;
+    max-width: 95vw;
+    box-shadow: -8px -8px 20px rgba(250,251,255,1), 8px 8px 20px rgba(22,27,29,0.3);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.sc-board-form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(22,27,29,0.08);
+}
+.sc-board-form-body {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    max-height: 60vh;
+}
+.sc-board-form-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid rgba(22,27,29,0.08);
+}
+.sc-form-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+.sc-form-label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #8899aa;
+    width: 72px;
+    flex-shrink: 0;
+    padding-top: 6px;
+}
+.sc-form-input {
+    flex: 1;
+    height: 30px;
+    padding: 0 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #4a5a68;
+    background: #EFF2F9;
+    border: none;
+    border-radius: 8px;
+    outline: none;
+    box-shadow: inset -2px -2px 4px rgba(250,251,255,1), inset 2px 2px 4px rgba(22,27,29,0.18);
+}
+.sc-form-check {
+    font-size: 12px;
+    color: #6E7F8D;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+}
+.sc-s37-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #4a5a68;
+    background: #EFF2F9;
+    border-radius: 6px;
+    padding: 3px 8px;
+    box-shadow: inset -2px -2px 4px rgba(250,251,255,1), inset 2px 2px 4px rgba(22,27,29,0.15);
+}
+.sc-s37-item span { flex: 1; }
+.sc-s37-remove {
+    cursor: pointer;
+    color: #E24B4A;
+    font-size: 11px;
+    padding: 0 2px;
+}
+
+</style>
 <script>
 let activeScenario  = null;
 let scenariBaseDir  = null;
-let scMode          = null;  // "load" | "create"
-let scSelectedDir   = null;  // directory selected in create mode
+let scMode          = null;
+let scSelectedDir   = null;
 
 const YAML_TEMPLATE = `boards:
   - board: 
@@ -294,14 +512,13 @@ function onPageLoad() {
     }
 }
 
-// ── mode switching ────────────────────────────────
 function activateMode(mode) {
     scMode = mode;
-
     document.getElementById("scLoadBtn").classList.toggle("open",   mode === "load");
     document.getElementById("scCreateBtn").classList.toggle("open", mode === "create");
     document.getElementById("scBrowseBtn").style.display    = mode === "load"   ? "" : "none";
     document.getElementById("scNewDirBtn").style.display    = mode === "create" ? "" : "none";
+    document.getElementById("scAddBoardBtn").style.display  = mode === "create" ? "" : "none";
     document.getElementById("scFromGroupBtn").style.display = mode === "create" ? "" : "none";
     document.getElementById("scSaveBtn").style.display      = mode === "create" ? "" : "none";
     document.getElementById("scLeftTitle").innerText        = mode === "load" ? "Scenarios" : "Directories & Scenarios";
@@ -311,20 +528,21 @@ function activateMode(mode) {
     if (mode === "load") {
         document.getElementById("scYamlView").style.display   = "";
         document.getElementById("scYamlEditor").style.display = "none";
-        document.getElementById("scCheckBtn").disabled        = true;
-        document.getElementById("scRunBtn").disabled          = true;
+        if (document.getElementById("scEditorHint"))
+            document.getElementById("scEditorHint").style.display = "none";
+        document.getElementById("scCheckBtn").disabled = true;
+        document.getElementById("scRunBtn").disabled   = true;
     } else {
         document.getElementById("scYamlView").style.display   = "none";
         document.getElementById("scYamlEditor").style.display = "";
         document.getElementById("scYamlEditor").value         = YAML_TEMPLATE;
+        document.getElementById("scYamlEditor").title         = "Edit YAML directly or use + Board to add entries";
         scSelectedDir = null;
-        document.getElementById("scSelectedDirName").innerText = "— none selected —";
+        document.getElementById("scSelectedDirName").innerText = "\u2014 none selected \u2014";
     }
-
     loadScenarios();
 }
 
-// ── load scenarios (both modes) ───────────────────
 async function loadScenarios() {
     if (!scenariBaseDir) return;
     const btn = document.getElementById("scLoadBtn");
@@ -341,7 +559,7 @@ function renderScenarios(data) {
     const wrap = document.getElementById("scListWrap");
     wrap.innerHTML = "";
     if (!data || data.length === 0) {
-        wrap.innerHTML = '<div class="sc-hint">No directories found</div>';
+        wrap.innerHTML = '<div class="sc-hint">No scenarios found</div>';
         return;
     }
     data.forEach(({ dir, files }) => {
@@ -349,13 +567,10 @@ function renderScenarios(data) {
         groupTitle.className = "sc-group-title" + (scMode === "create" ? " sc-dir-selectable" : "");
         groupTitle.innerText = dir;
         groupTitle.dataset.dir = dir;
-        if (scMode === "create") {
-            groupTitle.onclick = () => selectDirectory(dir);
-        }
+        if (scMode === "create") groupTitle.onclick = () => selectDirectory(dir);
         wrap.appendChild(groupTitle);
 
         if (files.length === 0 && scMode === "create") {
-            // Show empty hint under the dir in create mode
             const hint = document.createElement("div");
             hint.style.cssText = "font-size:10px; color:#b5bfc6; padding:2px 8px 4px;";
             hint.innerText = "empty";
@@ -380,7 +595,6 @@ function renderScenarios(data) {
     });
 }
 
-// ── Load mode ─────────────────────────────────────
 async function selectScenario(el, key, name, dir, file) {
     document.querySelectorAll(".sc-item").forEach(i => i.classList.remove("sc-item-active"));
     el.classList.add("sc-item-active");
@@ -388,35 +602,34 @@ async function selectScenario(el, key, name, dir, file) {
     document.getElementById("scCheckBtn").disabled = false;
     document.getElementById("scRunBtn").disabled   = false;
     document.getElementById("scRightTitle").innerText = name;
+    document.getElementById("scCheckReport").style.display = "none";
     try {
         const res  = await fetch(`/api/scenario-content?dir=${encodeURIComponent(scenariBaseDir)}&path=${encodeURIComponent(key)}`);
         const data = await res.json();
         renderYaml(data.content || "");
     } catch(e) {
         document.getElementById("scYamlView").innerHTML =
-            `<div class="sc-hint" style="color:#E24B4A">Error loading file</div>`;
+            '<div class="sc-hint" style="color:#E24B4A">Error loading file</div>';
     }
 }
 
-// ── Create mode ───────────────────────────────────
 function selectDirectory(dir) {
     scSelectedDir = dir;
     document.getElementById("scSelectedDirName").innerText = dir;
     document.querySelectorAll(".sc-group-title").forEach(t =>
         t.classList.toggle("sc-dir-active", t.dataset.dir === dir));
-    document.querySelectorAll(".sc-item").forEach(i =>
-        i.classList.remove("sc-item-active"));
+    document.querySelectorAll(".sc-item").forEach(i => i.classList.remove("sc-item-active"));
     document.getElementById("scYamlEditor").value = YAML_TEMPLATE;
     document.getElementById("scRightTitle").innerText = "New Scenario";
+    document.getElementById("scCheckReport").style.display = "none"
 }
 
 async function copyScenario(el, key, name, dir) {
-    // Select parent dir too
     selectDirectory(dir);
-    // Highlight this item
     document.querySelectorAll(".sc-item").forEach(i => i.classList.remove("sc-item-active"));
     el.classList.add("sc-item-active");
     document.getElementById("scRightTitle").innerText = `Copy of ${name}`;
+    document.getElementById("scCheckReport").style.display = "none"
     try {
         const res  = await fetch(`/api/scenario-content?dir=${encodeURIComponent(scenariBaseDir)}&path=${encodeURIComponent(key)}`);
         const data = await res.json();
@@ -436,7 +649,6 @@ async function newDirectory() {
             body: JSON.stringify({ base: scenariBaseDir, dir: name.trim() })
         });
         await loadScenarios();
-        // Auto-select after render
         setTimeout(() => selectDirectory(name.trim()), 50);
     } catch(e) { console.error(e); }
 }
@@ -457,7 +669,7 @@ async function browseDirectory() {
     }
 }
 
-// ── From group ────────────────────────────────────
+let groupPanelMode2 = null;
 async function toggleGroupPicker() {
     const panel = document.getElementById("scGroupPicker");
     if (panel.classList.contains("visible")) { closeGroupPicker(); return; }
@@ -483,9 +695,7 @@ async function toggleGroupPicker() {
             const count = (gdata.adapters || []).length;
             const item  = document.createElement("div");
             item.className = "group-item";
-            item.innerHTML = `
-                <span class="group-item-name">${name}</span>
-                <span class="group-item-count">${count} adapter${count !== 1 ? "s" : ""}</span>`;
+            item.innerHTML = `<span class="group-item-name">${name}</span><span class="group-item-count">${count} adapter${count !== 1 ? "s" : ""}</span>`;
             item.onclick = () => { populateFromGroup(gdata); closeGroupPicker(); };
             container.appendChild(item);
         }
@@ -502,35 +712,31 @@ function populateFromGroup(gdata) {
     const boards = adapters.map(a => {
         const isIP = a.connectivityType !== "usb";
         return [
-            `  - board: `,
-            `    jlink_name_or_ip: ${isIP && a.host ? a.host : ""}`,
-            `    masserase: true`,
-            `    halt_reset: true`,
-            `    open_terminal: true`,
-            `    s37_files:`,
-            `      - .s37`,
-            `    script: ""`,
+            "  - board: ",
+            "    jlink_name_or_ip: " + (isIP && a.host ? a.host : ""),
+            "    masserase: true",
+            "    halt_reset: true",
+            "    open_terminal: true",
+            "    s37_files:",
+            "      - .s37",
+            '    script: ""',
         ].join("\n");
     }).join("\n");
-    document.getElementById("scYamlEditor").value = `boards:\n${boards}\n`;
+    document.getElementById("scYamlEditor").value = "boards:\n" + boards + "\n";
+    document.getElementById("scCheckBtn").disabled = false;
 }
 
-// ── Save ──────────────────────────────────────────
 async function saveScenario() {
     if (!scSelectedDir) { alert("Please select a directory on the left first."); return; }
     const yaml = document.getElementById("scYamlEditor").value;
     if (!yaml.trim()) { alert("YAML content is empty."); return; }
     const name = prompt("Scenario name (without .yaml):");
     if (!name || !name.trim()) return;
-
     try {
         const res = await fetch("/api/scenario-save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                base: scenariBaseDir, dir: scSelectedDir,
-                name: name.trim(), content: yaml
-            })
+            body: JSON.stringify({ base: scenariBaseDir, dir: scSelectedDir, name: name.trim(), content: yaml })
         });
         const data = await res.json();
         if (data.ok) {
@@ -538,39 +744,128 @@ async function saveScenario() {
             btn.classList.add("open");
             setTimeout(() => btn.classList.remove("open"), 1500);
             await loadScenarios();
-        } else {
-            alert("Save failed: " + (data.error || "unknown error"));
-        }
+        } else { alert("Save failed: " + (data.error || "unknown error")); }
     } catch(e) { alert("Save error: " + e.message); }
 }
 
-// ── Yaml view ─────────────────────────────────────
-function renderYaml(text) {
-    const wrap = document.getElementById("scYamlView");
-    const lines = text.split("\n").map(line => {
-        if (/^\s*#/.test(line))
-            return `<span class="sc-yaml-comment">${esc(line)}</span>`;
-        if (/^\s*-\s/.test(line))
-            return line.replace(/^(\s*-\s*)(.*)$/, (_, dash, rest) =>
-                `<span class="sc-yaml-dash">${esc(dash)}</span>${highlightKeyVal(rest)}`);
-        return highlightKeyVal(line);
+async function onScCheck() {
+    const btn = document.getElementById("scCheckBtn");
+    btn.classList.add("open");
+    btn.disabled = true;
+    document.getElementById("scCheckReport").style.display = "none";
+
+    let body;
+    if (scMode === "create") {
+        const content = document.getElementById("scYamlEditor").value;
+        body = { base: scenariBaseDir, dir: scSelectedDir || "", content };
+    } else {
+        if (!activeScenario) { btn.disabled = false; return; }
+        body = { base: scenariBaseDir, path: activeScenario.key };
+    }
+
+    try {
+        const res  = await fetch("/api/scenario-check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        const issueLines = new Set((data.issues || []).map(i => i.line).filter(Boolean));
+        const allOk    = data.ok;
+        const hasIssues = (data.issues || []).length > 0;
+
+        if (scMode === "load" && data.content) renderYaml(data.content, issueLines);
+        if (hasIssues) showCheckReport(allOk, data.issues || []);
+
+        btn.classList.remove("open");
+        btn.classList.add(allOk ? "success" : "error");
+        setTimeout(() => {
+            btn.classList.remove("success", "error");
+            btn.disabled = false;
+        }, allOk ? 3000 : 5000);
+    } catch(e) {
+        btn.classList.remove("open");
+        btn.disabled = false;
+    }
+}
+
+function showCheckReport(ok, issues) {
+    const errors   = issues.filter(i => i.level === "error");
+    const warnings = issues.filter(i => i.level === "warning");
+    const infos    = issues.filter(i => i.level === "info");
+    const allOk    = errors.length === 0;
+
+    if (allOk && issues.length === 0) return; // pure success, button flash is enough
+
+    const popup = document.getElementById("scCheckPopup");
+    const title = document.getElementById("scCheckPopupTitle");
+    const body  = document.getElementById("scCheckPopupBody");
+
+    if (allOk) {
+        title.innerText   = warnings.length > 0
+            ? `⚠ ${warnings.length} warning${warnings.length > 1 ? "s" : ""} — OK to run`
+            : "✓ All checks passed";
+        title.style.color = "#854F0B";
+    } else {
+        title.innerText   = `✕ ${errors.length} error${errors.length > 1 ? "s" : ""}` +
+            (warnings.length > 0 ? ` + ${warnings.length} warning${warnings.length > 1 ? "s" : ""}` : "");
+        title.style.color = "#A32D2D";
+    }
+
+    body.innerHTML = issues.map(i => {
+        const lineRef = i.line ? `<span class="sc-check-line">line ${i.line}</span>` : "";
+        const color   = i.level === "error"   ? "#A32D2D" :
+                        i.level === "warning"  ? "#854F0B" : "#6E7F8D";
+        const bg      = i.level === "error"   ? "rgba(226,75,74,0.08)" :
+                        i.level === "warning"  ? "rgba(239,159,39,0.1)" : "transparent";
+        return `<div class="sc-check-item" style="color:${color}; background:${bg};">
+            ${lineRef}${esc(i.msg)}
+        </div>`;
+    }).join("");
+
+    popup.style.display = "flex";
+    popup.onclick = e => { if (e.target === popup) popup.style.display = "none"; };
+}
+
+function onScRun() { /* TODO */ }
+
+function renderYaml(text, issueLines = new Set()) {
+    const wrap  = document.getElementById("scYamlView");
+    const lines = text.split("\n");
+    const html  = lines.map((line, idx) => {
+        const lineNum  = idx + 1;
+        const hasIssue = issueLines.has(lineNum);
+        const rendered = highlightLine(line);
+        if (hasIssue) {
+            return `<mark class="sc-line-error">${rendered}</mark>`;
+        }
+        return rendered;
     });
-    wrap.innerHTML = `<pre class="sc-yaml-content">${lines.join("\n")}</pre>`;
+    wrap.innerHTML = `<pre class="sc-yaml-content">${html.join("\n")}</pre>`;
+}
+
+function highlightLine(line) {
+    if (/^\s*#/.test(line)) return `<span class="sc-yaml-comment">${esc(line)}</span>`;
+    if (/^\s*-\s/.test(line))
+        return line.replace(/^(\s*-\s*)(.*)$/, (_, dash, rest) =>
+            `<span class="sc-yaml-dash">${esc(dash)}</span>${highlightKeyVal(rest)}`);
+    return highlightKeyVal(line);
 }
 
 function highlightKeyVal(line) {
     return line.replace(/^(\s*)([^:]+)(:)(\s*.*)$/, (_, indent, key, colon, val) =>
-        `${esc(indent)}<span class="sc-yaml-key">${esc(key)}</span>${esc(colon)}<span class="sc-yaml-value">${esc(val)}</span>`
-    );
+        `${esc(indent)}<span class="sc-yaml-key">${esc(key)}</span>${esc(colon)}<span class="sc-yaml-value">${esc(val)}</span>`);
 }
 
 function esc(s) {
-    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    if (s == null) return "";
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-// ── Placeholders ──────────────────────────────────
-function onScCheck() { /* TODO */ }
-function onScRun()   { /* TODO */ }
+function onEditorInput() {
+    const hasContent = document.getElementById("scYamlEditor").value.trim().length > 0;
+    document.getElementById("scCheckBtn").disabled = !hasContent;
+}
 
 document.addEventListener("click", e => {
     const panel = document.getElementById("scGroupPicker");
@@ -579,4 +874,160 @@ document.addEventListener("click", e => {
     if (e.target.id === "scFromGroupBtn") return;
     closeGroupPicker();
 });
+
+document.addEventListener("click", e => {
+    const overlay = document.getElementById("boardFormOverlay");
+    if (overlay && e.target === overlay) closeBoardForm();
+});
+
+
+// ── Board form ────────────────────────────────────
+let bfS37Files = [];
+
+function openBoardForm() {
+    bfS37Files = [];
+    document.getElementById("bfBoard").value   = "";
+    document.getElementById("bfJlink").value   = "";
+    document.getElementById("bfScript").value  = "";
+    document.getElementById("bfMasserase").checked = true;
+    document.getElementById("bfHaltReset").checked = true;
+    document.getElementById("bfOpenTerm").checked  = true;
+    document.getElementById("bfS37List").innerHTML = "";
+
+    // Populate adapter dropdown
+    const sel = document.getElementById("bfAdapter");
+    sel.innerHTML = '<option value="">— pre-fill from adapter —</option>';
+    const cache = window.appState.cache || [];
+    cache.forEach(a => {
+        const opt = document.createElement("option");
+        opt.value = JSON.stringify(a);
+        opt.innerText = (a.nickname || a.serialNumber) + " — " + (a.boardId || "");
+        sel.appendChild(opt);
+    });
+
+    const overlay = document.getElementById("boardFormOverlay");
+    overlay.style.display = "flex";
+}
+
+function closeBoardForm() {
+    document.getElementById("boardFormOverlay").style.display = "none";
+}
+
+function onAdapterSelect(val) {
+    if (!val) return;
+    try {
+        const a = JSON.parse(val);
+        const isIP = a.connectivityType !== "usb";
+        document.getElementById("bfJlink").value = isIP && a.host ? a.host : (a.serialNumber || "");
+        if (a.boardId) {
+            // Strip BRD prefix — keep only e.g. "4162A" from "BRD4162A"
+            const boardShort = a.boardId.replace(/^BRD/i, "");
+            document.getElementById("bfBoard").value = boardShort;
+        }
+    } catch(e) {}
+}
+
+async function addS37File() {
+    const startDir = scSelectedDir ? `${scenariBaseDir}/${scSelectedDir}` : scenariBaseDir;
+    let filePath = null;
+    if (window.pywebview) {
+        filePath = await window.pywebview.api.pick_file(startDir, ["S37 files (*.s37)", "All files (*.*)"]);
+    } else {
+        filePath = prompt("S37 file path:");
+    }
+    if (!filePath) return;
+
+    // Copy to scenario dir if needed
+    const res  = await fetch("/api/scenario-copy-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ src: filePath, base: scenariBaseDir, dir: scSelectedDir || "" })
+    });
+    const data = await res.json();
+    if (!data.ok) { alert("Failed: " + data.error); return; }
+
+    bfS37Files.push(data.filename);
+    renderS37List();
+}
+
+function renderS37List() {
+    const container = document.getElementById("bfS37List");
+    container.innerHTML = "";
+    bfS37Files.forEach((f, i) => {
+        const item = document.createElement("div");
+        item.className = "sc-s37-item";
+        item.innerHTML = `<span>${f}</span><span class="sc-s37-remove" onclick="removeS37(${i})">✕</span>`;
+        container.appendChild(item);
+    });
+}
+
+function removeS37(idx) {
+    bfS37Files.splice(idx, 1);
+    renderS37List();
+}
+
+async function browseScript() {
+    const startDir = scSelectedDir ? `${scenariBaseDir}/${scSelectedDir}` : scenariBaseDir;
+    let filePath = null;
+    if (window.pywebview) {
+        filePath = await window.pywebview.api.pick_file(startDir, ["Python scripts (*.py)", "All files (*.*)"]);
+    } else {
+        filePath = prompt("Script file path:");
+    }
+    if (!filePath) return;
+
+    const res  = await fetch("/api/scenario-copy-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ src: filePath, base: scenariBaseDir, dir: scSelectedDir || "" })
+    });
+    const data = await res.json();
+    if (!data.ok) { alert("Failed: " + data.error); return; }
+    document.getElementById("bfScript").value = data.filename;
+}
+
+function appendBoard() {
+    const board   = document.getElementById("bfBoard").value.trim();
+    const jlink   = document.getElementById("bfJlink").value.trim();
+    const masserase  = document.getElementById("bfMasserase").checked;
+    const haltReset  = document.getElementById("bfHaltReset").checked;
+    const openTerm   = document.getElementById("bfOpenTerm").checked;
+    const script  = document.getElementById("bfScript").value.trim();
+
+    if (!board && !jlink) { alert("Please fill at least Board ID or JLink/IP"); return; }
+
+    const s37Lines = bfS37Files.length > 0
+        ? bfS37Files.map(f => `      - ${f}`).join("\n")
+        : "      - .s37";
+
+    const block = [
+        "  - board: " + board,
+        "    jlink_name_or_ip: " + jlink,
+        "    masserase: " + masserase,
+        "    halt_reset: " + haltReset,
+        "    open_terminal: " + openTerm,
+        "    s37_files:",
+        s37Lines,
+        '    script: "' + script + '"',
+    ].join("\n");
+
+    const editor = document.getElementById("scYamlEditor");
+    const current = editor.value.trimEnd();
+
+    // If editor is empty or just template header, start fresh
+    if (!current || current === YAML_TEMPLATE.trimEnd()) {
+        editor.value = "boards:\n" + block + "\n";
+    } else {
+        editor.value = current + "\n" + block + "\n";
+    }
+
+    document.getElementById("scCheckBtn").disabled = false;
+    closeBoardForm();
+}
+
+// Close overlay on background click
+document.getElementById("boardFormOverlay").addEventListener("click", e => {
+    if (e.target === document.getElementById("boardFormOverlay")) closeBoardForm();
+});
+
 </script>

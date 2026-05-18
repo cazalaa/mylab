@@ -1,0 +1,9 @@
+boards:
+  - board: 4162A
+    jlink_name_or_ip: 440117574
+    masserase: true
+    halt_reset: true
+    open_terminal: test
+    s37_files: 
+      - .s37
+    script: ""

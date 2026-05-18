@@ -96,6 +96,13 @@ async function togglePage(name) {
             old.remove();
         });
 
+        div.querySelectorAll("style").forEach(old => {
+            const s = document.createElement("style");
+            s.textContent = old.textContent;
+            document.head.appendChild(s);
+            old.remove();
+        });
+
         loadedPages.add(name);
         if (typeof onPageLoad === "function") onPageLoad();
 
@@ -112,7 +119,8 @@ async function togglePage(name) {
 
     document.querySelectorAll(".topbar-actions button").forEach(b => b.classList.remove("open"));
     const btnId = "btn" + name.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("");
-    document.getElementById(btnId).classList.add("open");
+    const btnEl = document.getElementById(btnId);
+    if (btnEl) btnEl.classList.add("open");
 
     if (window.pywebview) window.pywebview.api.set_height(700);
 }

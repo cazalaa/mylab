@@ -256,6 +256,17 @@ class WindowAPI:
         )
         return result[0] if result else None
 
+    def pick_file(self, directory="", file_types=None):
+        if file_types is None:
+            file_types = ("All files (*.*)",)
+        result = webview.windows[0].create_file_dialog(
+            webview.OPEN_DIALOG,
+            directory=str(directory),
+            allow_multiple=False,
+            file_types=tuple(file_types)
+        )
+        return result[0] if result else None
+    
     def open_terminal(self, serial):
         """Appelé depuis le JS via pywebview.api.open_terminal(serial)"""
         def _open():
@@ -313,7 +324,7 @@ def terminal_info(serial):
                     tty_path = c
                     break
             if not tty_path:
-                for port in serial_tools.list_ports.comports():
+                for port in serial.tools.list_ports.comports():
                     if serial.lower() in (port.serial_number or "").lower():
                         tty_path = port.device
                         break
@@ -586,7 +597,243 @@ def scenario_save():
         f.write(content)
     return jsonify({"ok": True})
 
+import yaml
+
+import re as re_module
+
+@app.route("/api/scenario-check", methods=["POST"])
+def scenario_check():
+    base     = request.json.get("base", SCENARI_DIR)
+    path     = request.json.get("path", "")
+    content  = request.json.get("content", None)
+    dir_name = request.json.get("dir", "")
+    base     = os.path.abspath(base)
+
+    if content is not None:
+        scenario_dir = os.path.abspath(os.path.join(base, dir_name)) if dir_name else base
+    else:
+        full = os.path.abspath(os.path.join(base, path))
+        if not full.startswith(base) or not os.path.isfile(full):
+            return jsonify({"ok": False, "issues": [{"line": None, "msg": "File not found"}]}), 400
+        scenario_dir = os.path.dirname(full)
+        with open(full) as f:
+            content = f.read()
+
+    scenario_dir = os.path.abspath(scenario_dir)
+
+    # Load available adapters
+    try:
+        adapters_data = requests.get(f"{SDM_BASE}/api/adapters", timeout=3).json()
+        if isinstance(adapters_data, dict):
+            adapters_data = adapters_data.get("adapters", [])
+    except Exception as e:
+        return jsonify({"ok": False, "issues": [{"line": None, "msg": f"Cannot reach SDM: {e}"}]}), 500
+
+    # Build adapter lookup maps
+    # host → adapter, serialNumber → adapter
+    adapter_by_host   = {a.get("host"):         a for a in adapters_data if a.get("host")}
+    adapter_by_serial = {a.get("serialNumber"):  a for a in adapters_data if a.get("serialNumber")}
+
+    def is_valid_ip(s):
+        s = str(s)
+        parts = s.split(".")
+        if len(parts) != 4: return False
+        try:
+            return all(0 <= int(p) <= 255 for p in parts)
+        except:
+            return False
+
+    def is_valid_serial(s):
+        return re_module.match(r"^\d{9}$", str(s)) is not None
+    # Parse YAML
+    try:
+        scenario = yaml.safe_load(content)
+    except yaml.YAMLError as e:
+        return jsonify({"ok": False, "issues": [{"line": None, "msg": f"YAML parse error: {e}"}], "content": content})
+
+    lines = content.split("\n")
+    def find_line(keyword, start=0):
+        for i, l in enumerate(lines[start:], start=start):
+            if keyword in l:
+                return i + 1
+        return None
+
+    issues = []
+    boards = scenario.get("boards", [])
+
+    if not boards:
+        issues.append({"line": find_line("boards"), "msg": "No boards defined"})
+
+    board_search_start = 0
+    for i, board in enumerate(boards):
+        board_line = find_line("- board", board_search_start)
+        if board_line:
+            board_search_start = board_line
+
+        def issue(key, msg):
+            line = find_line(key + ":", board_search_start - 1) if key else board_line
+            issues.append({"line": line, "msg": f"Board #{i+1}: {msg}", "level": "error"})
+
+        def warn(key, msg):
+            line = find_line(key + ":", board_search_start - 1) if key else board_line
+            issues.append({"line": line, "msg": f"Board #{i+1}: {msg}", "level": "warning"})
+
+        def info(key, msg):
+            line = find_line(key + ":", board_search_start - 1) if key else board_line
+            issues.append({"line": line, "msg": f"ℹ Board #{i+1}: {msg}", "level": "info"})
+        # ── board (mandatory) ──────────────────────────
+        board_id = board.get("board", "")
+        if not board_id:
+            issue("board", "'board' is mandatory and is empty")
+        else:
+            # Validate with SDM
+            try:
+                result = subprocess.run(
+                    [SDM_PATH, "board", "search", "-s", str(board_id)],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode != 0:
+                    issue("board", f"board '{board_id}' not found in SDM")
+            except Exception as e:
+                issue("board", f"board search failed: {e}")
+
+        # ── jlink_name_or_ip (optional) ────────────────
+        jlink = str(board.get("jlink_name_or_ip", "")).strip()
+        if jlink.lower() == "none":
+            jlink = ""
+        matched_adapter = None
+
+        if jlink:
+            # Validate syntax
+            if not is_valid_ip(jlink) and not is_valid_serial(jlink):
+                issue("jlink_name_or_ip",
+                      f"'{jlink}' is not a valid IP address (x.x.x.x) or Silabs serial number (9 digits)")
+            else:
+                # Find matching adapter
+                matched_adapter = adapter_by_host.get(jlink) or adapter_by_serial.get(jlink)
+
+                if not matched_adapter:
+                    issue("jlink_name_or_ip",
+                          f"'{jlink}' not found in available adapters")
+                elif board_id:
+                    # Check if board matches
+                    yaml_board_norm     = re_module.sub(r'^BRD', '', str(board_id), flags=re_module.IGNORECASE)
+
+                    adapter_boards = matched_adapter.get("boards", [])
+                    adapter_board_ids = set()
+                    for ab in adapter_boards:
+                        for field in ["id", "shortLabel", "label", "pn"]:
+                            val = ab.get(field, "")
+                            if val:
+                                normalized = re_module.sub(r'^BRD', '', val.split()[0], flags=re_module.IGNORECASE).upper()
+                                adapter_board_ids.add(normalized)
+
+                    if yaml_board_norm not in adapter_board_ids:
+                        nickname = matched_adapter.get("nickname") or matched_adapter.get("serialNumber", "")
+                        best_id  = adapter_boards[0].get("shortLabel", adapter_boards[0].get("id", "?")) if adapter_boards else "?"
+                        best_short = re_module.sub(r'^BRD', '', best_id, flags=re_module.IGNORECASE)
+                        issue("board",
+                              f"adapter '{jlink}' ({nickname}) has board '{best_short}' "
+                              f"but scenario specifies '{yaml_board_norm}'. "
+                              f"Consider changing board to '{best_short}'")
+        # If board_id set but no jlink — check if an available adapter has that board
+# If board_id set but no jlink — check if an available adapter has that board
+        if board_id and not jlink:
+            yaml_board_norm = re_module.sub(r'^BRD', '', str(board_id), flags=re_module.IGNORECASE).upper()
+            matching = []
+            for a in adapters_data:
+                adapter_boards = a.get("boards", [])
+                for ab in adapter_boards:
+                    for field in ["id", "shortLabel"]:
+                        val = ab.get(field, "")
+                        normalized = re_module.sub(r'^BRD', '', val.split()[0] if val else "", flags=re_module.IGNORECASE).upper()
+                        if normalized == yaml_board_norm:
+                            matching.append(a)
+                            break
+
+            if matching:
+                suggestions = ", ".join(
+                    f"{a.get('host') or a.get('serialNumber', '?')}"
+                    + (f" ({a.get('nickname')})" if a.get('nickname') else "")
+                    for a in matching
+                )
+                warn("jlink_name_or_ip",
+                     f"no jlink/IP set — board '{yaml_board_norm}' found on: {suggestions}. "
+                     f"Run will pick one randomly")
+            else:
+                # No exact match — suggest any available adapter
+                if adapters_data:
+                    any_adapter = adapters_data[0]
+                    any_id = any_adapter.get("host") or any_adapter.get("serialNumber", "?")
+                    any_nick = f" ({any_adapter.get('nickname')})" if any_adapter.get("nickname") else ""
+                    warn("jlink_name_or_ip",
+                        f"no jlink/IP set and no adapter with board '{yaml_board_norm}' found")
+                else:
+                    info("jlink_name_or_ip",
+                         f"no adapters available — connect a board with '{yaml_board_norm}'")
+        # ── booleans (optional, with defaults) ────────
+        for field, default in [("masserase", True), ("halt_reset", False), ("open_terminal", False)]:
+            val = board.get(field)
+            if val is not None and not isinstance(val, bool):
+                issue(field, f"'{field}' must be true or false (default: {str(default).lower()}), got '{val}'")
+            # No issue if missing — defaults apply
+
+        # ── s37_files (optional) ──────────────────────
+        s37_files = board.get("s37_files", [])
+        if s37_files:
+            if not isinstance(s37_files, list):
+                issue("s37_files", "'s37_files' must be a list")
+            else:
+                for f_name in s37_files:
+                    if str(f_name).strip() in ("", ".s37"):
+                        continue  # placeholder, skip
+                    f_path = os.path.join(scenario_dir, str(f_name))
+                    if not os.path.isfile(f_path):
+                        line = find_line(str(f_name), board_search_start - 1)
+                        issues.append({"line": line, "msg": f"Board #{i+1}: s37 file '{f_name}' not found in scenario directory"})
+
+        # ── script (optional) ─────────────────────────
+        script = board.get("script", "")
+        if script and isinstance(script, str) and script.strip():
+            script_path = os.path.join(scenario_dir, script)
+            if not os.path.isfile(script_path):
+                issue("script", f"script '{script}' not found in scenario directory")
+
+    errors_only = [i for i in issues if i.get("level") == "error"]
+    return jsonify({
+        "ok":      len(issues) == 0,
+        "issues":  issues,
+        "content": content
+    })
+
+@app.route("/api/scenario-copy-file", methods=["POST"])
+def scenario_copy_file():
+    src      = request.json.get("src", "")
+    base     = request.json.get("base", SCENARI_DIR)
+    dir_name = request.json.get("dir", "")
+    base     = os.path.abspath(base)
+    dest_dir = os.path.abspath(os.path.join(base, dir_name))
+
+    if not dest_dir.startswith(base):
+        return jsonify({"ok": False, "error": "invalid path"}), 400
+
+    src = os.path.abspath(src)
+    filename = os.path.basename(src)
+    dest = os.path.join(dest_dir, filename)
+
+    # Already in scenario dir — no copy needed
+    if os.path.dirname(src) == dest_dir:
+        return jsonify({"ok": True, "filename": filename, "copied": False})
+
+    try:
+        import shutil
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copy2(src, dest)
+        return jsonify({"ok": True, "filename": filename, "copied": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
     
+
 # ----------------------------
 if __name__ == "__main__":
     ensure_sdm()

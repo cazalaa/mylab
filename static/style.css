@@ -901,3 +901,35 @@ button.error {
     word-break: break-word;
     overflow-wrap: break-word;
 }
+
+.sc-check-report {
+    margin: 10px;
+    border-radius: 12px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.sc-check-header {
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 12px 12px 0 0;
+}
+.sc-check-header.ok  { background: #EAF3DE; color: #3B6D11; }
+.sc-check-header.err { background: #FCEBEB; color: #A32D2D; border-radius: 12px 12px 0 0; }
+.sc-check-header.ok-alone  { border-radius: 12px; }
+.sc-check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    background: #FCEBEB;
+    border-radius: 0 0 12px 12px;
+}
+.sc-check-item {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #A32D2D;
+    padding: 4px 8px;
+    background: rgba(255,255,255,.5);
+    border-radius: 6px;
+}
