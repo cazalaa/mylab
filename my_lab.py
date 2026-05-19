@@ -16,6 +16,7 @@ import serial.tools.list_ports
 import pty, os, termios
 import yaml
 import datetime
+import re
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 GROUPS_DIR = os.path.dirname(os.path.abspath(__file__))
