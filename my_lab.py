@@ -15,7 +15,9 @@ import glob as glob_module
 import serial.tools.list_ports 
 import pty, os, termios
 import yaml
+import datetime
 
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 GROUPS_DIR = os.path.dirname(os.path.abspath(__file__))
 SCENARI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenari")
 
@@ -356,6 +358,7 @@ def handle_connect_telnet(data):
 
     if room in active_telnets:
         print(f"[TELNET] already connected: {room}")
+        emit("terminal_ready", {"room": room})
         return  # déjà connecté
 
     try:
@@ -899,9 +902,10 @@ class Board:
             (admin_room, self.admin_port, "_admin_sock"),
         ]:
             if room in active_telnets:
-                # Reuse existing socket — no new reader needed
                 setattr(self, attr, active_telnets[room])
                 print(f"[RUN] reusing existing connection for {room}")
+                # Notify any terminal window that may be listening
+                socketio.emit("terminal_ready", {"room": room}, room=room)
             else:
                 s = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
                 s.settimeout(5)
@@ -911,8 +915,8 @@ class Board:
                 setattr(self, attr, s)
                 self._start_reader(s, room)
                 print(f"[RUN] new connection for {room}")
+                socketio.emit("terminal_ready", {"room": room}, room=room)
 
-        # Open terminal window if requested
         if self.open_terminal_flag:
             def _open():
                 url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}"
@@ -927,6 +931,7 @@ class Board:
     def _start_reader(self, sock, room):
         run_room = f"run_{self.run_id}"
         is_vcom  = room.endswith("_vcom")
+        stream   = "vcom" if is_vcom else "admin"
         listeners = self._vcom_listeners if is_vcom else self._admin_listeners
 
         def reader():
@@ -939,17 +944,16 @@ class Board:
                     # Forward to terminal
                     socketio.emit("terminal_output",
                                   {"data": text, "room": room}, room=room)
-                    # Forward to run output panel
-                    socketio.emit("run_output",
-                                  {"serial": self.serial, "data": text,
-                                   "stream": "vcom" if is_vcom else "admin"},
-                                  room=run_room)
-                    # Notify any waiting cli()/admin() calls
+                    # Log to file
+                    if self._log_path:
+                        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        with open(self._log_path, "a") as f:
+                            for line in text.splitlines():
+                                f.write(f"[{ts}][{stream}] {line}\n")
+                    # Notify listeners
                     for listener in list(listeners):
-                        try:
-                            listener(text)
-                        except Exception:
-                            pass
+                        try: listener(text)
+                        except: pass
                 except Exception:
                     break
             active_telnets.pop(room, None)
@@ -1106,9 +1110,21 @@ class Board:
         socketio.emit("run_output",
                       {"serial": self.serial, "data": str(msg) + "\n", "stream": "script"},
                       room=run_room)
+        if self._log_path:
+            ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            with open(self._log_path, "a") as f:
+                f.write(f"[{ts}][script] {msg}\n")
 
 
 # ── Run pipeline ─────────────────────────────────────────────
+
+def get_log_file(serial):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    dt = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Find next increment
+    existing = [f for f in os.listdir(LOG_DIR) if f.startswith(serial)]
+    n = len(existing) + 1
+    return os.path.join(LOG_DIR, f"{serial}_{dt}_{n:03d}.log")
 
 def _flash_board(board_cfg, scenario_dir, run_id):
     serial  = board_cfg.get("_resolved_serial", "")
@@ -1160,6 +1176,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
     serial = board_cfg.get("_resolved_serial", "unknown")
     print(f"[RUN] _run_board started serial={serial}")
     run_room = f"run_{run_id}"
+    log_path = get_log_file(serial)
     time.sleep(2.0)
 
     def emit_status(status, msg=""):
@@ -1169,15 +1186,30 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
                       {"serial": serial, "status": status, "msg": msg},
                       room=run_room)
 
-    emit_status("flashing")
+    def log(stream, text):
+        """Write to log file and emit to run panel."""
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        with open(log_path, "a") as f:
+            for line in text.splitlines():
+                f.write(f"[{ts}][{stream}] {line}\n")
 
+    emit_status("flashing", f"log: {os.path.basename(log_path)}")
+    # Write log header
+    with open(log_path, "w") as f:
+        f.write(f"# Run: {run_id}\n")
+        f.write(f"# Serial: {serial}\n")
+        f.write(f"# Scenario: {scenario_dir}\n")
+        f.write(f"# Started: {datetime.datetime.now().isoformat()}\n")
+        f.write(f"# {'='*60}\n\n")
     # Flash
     ok, flash_log = _flash_board(board_cfg, scenario_dir, run_id)
     for line in flash_log:
+        log("flash", line)
         socketio.emit("run_output",
                       {"serial": serial, "data": line + "\n", "stream": "flash"},
                       room=run_room)
     if not ok:
+        log("error", "Flash failed")
         emit_status("error", "Flash failed")
         return
 
@@ -1215,6 +1247,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         scenario_dir = scenario_dir,
         open_terminal = board_cfg.get("open_terminal", False)
     )
+    board._log_path = log_path
     try:
         print(f"[RUN] connecting board {serial} host={host} vcom={vcom_port} admin={admin_port}")
         board.connect()

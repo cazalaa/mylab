@@ -18,7 +18,7 @@ def script(board):
     board.reset()
     board.delay(1.5)  # wait for board to fully boot
     board.cli("getchannel")
-    board.cli("tx 10")
+    board.cli("tx 1")
     #board.cli("help")
     board.admin("boardid")
     board.button(0, 0.3)
