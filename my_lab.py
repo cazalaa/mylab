@@ -834,6 +834,541 @@ def scenario_copy_file():
         return jsonify({"ok": False, "error": str(e)}), 500
     
 
+
+# ============================================================
+# Board class + Run pipeline
+# ============================================================
+
+import uuid
+import importlib.util
+
+active_runs = {}  # run_id -> {status, boards: {serial: status}}
+
+# ── VCOM line ending helper ──────────────────────────────────
+LINE_ENDINGS = {"CR": b"\r", "LF": b"\n", "CRLF": b"\r\n"}
+
+class Board:
+    """
+    Wraps VCOM + ADMIN telnet connections for one board.
+    Connected before script runs, never closed automatically.
+    """
+
+    def __init__(self, serial, host, vcom_port, admin_port,
+                 run_id, scenario_dir, open_terminal=False):
+        self.serial        = serial
+        self.host          = host
+        self.vcom_port     = vcom_port
+        self.admin_port    = admin_port
+        self.run_id        = run_id
+        self.scenario_dir  = scenario_dir
+        self.open_terminal_flag = open_terminal
+
+        # Sockets (set in connect())
+        self._vcom_sock  = None
+        self._admin_sock = None
+
+        # Config (set by script via config_vcom / config_admin)
+        self._vcom_le     = b"\r\n"
+        self._vcom_echo   = True
+        self._vcom_prompt = ">"
+        self._admin_le    = b"\r\n"
+        self._admin_echo  = False
+        self._admin_prompt = "WSTK>"
+
+        self._vcom_listeners  = []
+        self._admin_listeners = []
+
+    # ── configuration ────────────────────────────────────────
+    def config_vcom(self, line_ending="CRLF", echo=True, prompt=">"):
+        self._vcom_le     = LINE_ENDINGS.get(line_ending.upper(), b"\r\n")
+        self._vcom_echo   = echo
+        self._vcom_prompt = prompt
+
+    def config_admin(self, line_ending="CRLF", echo=False, prompt="WSTK>"):
+        self._admin_le     = LINE_ENDINGS.get(line_ending.upper(), b"\r\n")
+        self._admin_echo   = echo
+        self._admin_prompt = prompt
+
+    # ── connect ──────────────────────────────────────────────
+    def connect(self):
+        vcom_room  = f"{self.serial}_vcom"
+        admin_room = f"{self.serial}_admin"
+
+        for room, port, attr in [
+            (vcom_room,  self.vcom_port,  "_vcom_sock"),
+            (admin_room, self.admin_port, "_admin_sock"),
+        ]:
+            if room in active_telnets:
+                # Reuse existing socket — no new reader needed
+                setattr(self, attr, active_telnets[room])
+                print(f"[RUN] reusing existing connection for {room}")
+            else:
+                s = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
+                s.settimeout(5)
+                s.connect((self.host, port))
+                s.settimeout(None)
+                active_telnets[room] = s
+                setattr(self, attr, s)
+                self._start_reader(s, room)
+                print(f"[RUN] new connection for {room}")
+
+        # Open terminal window if requested
+        if self.open_terminal_flag:
+            def _open():
+                url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}"
+                webview.create_window(
+                    f"{self.serial} — Terminal",
+                    url,
+                    width=820, height=520,
+                    resizable=True
+                )
+            threading.Thread(target=_open, daemon=True).start()
+
+    def _start_reader(self, sock, room):
+        run_room = f"run_{self.run_id}"
+        is_vcom  = room.endswith("_vcom")
+        listeners = self._vcom_listeners if is_vcom else self._admin_listeners
+
+        def reader():
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    text = chunk.decode("utf-8", errors="replace")
+                    # Forward to terminal
+                    socketio.emit("terminal_output",
+                                  {"data": text, "room": room}, room=room)
+                    # Forward to run output panel
+                    socketio.emit("run_output",
+                                  {"serial": self.serial, "data": text,
+                                   "stream": "vcom" if is_vcom else "admin"},
+                                  room=run_room)
+                    # Notify any waiting cli()/admin() calls
+                    for listener in list(listeners):
+                        try:
+                            listener(text)
+                        except Exception:
+                            pass
+                except Exception:
+                    break
+            active_telnets.pop(room, None)
+
+        threading.Thread(target=reader, daemon=True).start()
+
+    # ── VCOM ─────────────────────────────────────────────────
+    def write_cli(self, data):
+        if self._vcom_sock:
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            self._vcom_sock.sendall(data)
+            vcom_room = f"{self.serial}_vcom"
+            socketio.emit("terminal_echo",
+                          {"data": data.decode("utf-8", errors="replace"), "room": vcom_room},
+                          room=vcom_room)
+
+    def read_cli(self, timeout=2.0):
+        """Read raw data from VCOM with timeout."""
+        if not self._vcom_sock:
+            return ""
+        self._vcom_sock.settimeout(timeout)
+        data = b""
+        try:
+            while True:
+                chunk = self._vcom_sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        except Exception:
+            pass
+        self._vcom_sock.settimeout(None)
+        return data.decode("utf-8", errors="replace")
+
+    def cli(self, cmd, timeout=10.0):
+        if not self._vcom_sock:
+            return ""
+        payload = cmd.encode("utf-8") + self._vcom_le
+        self._vcom_sock.sendall(payload)
+
+        # Echo command to terminal
+        vcom_room = f"{self.serial}_vcom"
+        socketio.emit("terminal_echo",
+                      {"data": f"\u203a {cmd}", "room": vcom_room},
+                      room=vcom_room)
+
+        # Wait for prompt using event — reader thread will signal us
+        event    = threading.Event()
+        response = []
+        prompt   = self._vcom_prompt
+
+        def on_data(data):
+            response.append(data)
+            if prompt in data:
+                event.set()
+
+        self._vcom_listeners.append(on_data)
+        event.wait(timeout=timeout)
+        self._vcom_listeners.remove(on_data)
+
+        return "".join(response)
+
+    # ── ADMIN ────────────────────────────────────────────────
+    def _send_admin_raw(self, cmd):
+        if not self._admin_sock:
+            return
+        payload = cmd.encode("utf-8") + self._admin_le
+        self._admin_sock.sendall(payload)
+        admin_room = f"{self.serial}_admin"
+        socketio.emit("terminal_echo",
+                      {"data": f"\u203a {cmd}", "room": admin_room},
+                      room=admin_room)
+
+    def admin(self, cmd, timeout=10.0):
+        # High-level interpretation
+        cmd_lower = cmd.strip().lower()
+        if cmd_lower == "reset":
+            raw = "target reset 100"
+        elif cmd_lower in ("pb0", "button0"):
+            self._send_admin_raw("target button press 0")
+            time.sleep(0.1)
+            self._send_admin_raw("target button release 0")
+            return ""
+        elif cmd_lower in ("pb1", "button1"):
+            self._send_admin_raw("target button press 1")
+            time.sleep(0.1)
+            self._send_admin_raw("target button release 1")
+            return ""
+        else:
+            raw = cmd
+
+        if not self._admin_sock:
+            return ""
+
+        self._admin_sock.sendall((raw + self._admin_le.decode()).encode("utf-8"))
+        admin_room = f"{self.serial}_admin"
+        socketio.emit("terminal_echo",
+                      {"data": f"\u203a {raw}", "room": admin_room},
+                      room=admin_room)
+
+        event    = threading.Event()
+        response = []
+        prompt   = self._admin_prompt
+
+        def on_data(data):
+            response.append(data)
+            if prompt in data:
+                event.set()
+
+        self._admin_listeners.append(on_data)
+        event.wait(timeout=timeout)
+        self._admin_listeners.remove(on_data)
+
+        return "".join(response)
+
+    def reset(self):
+        result = self.admin("reset")
+        # Wait for boot banner to fully arrive — reader thread handles display
+        time.sleep(1.0)
+        return result
+
+    def button(self, pb, duration=0.1):
+        if not self._admin_sock:
+            return
+        self._send_admin_raw(f"target button press {pb}")
+        time.sleep(duration)
+        self._send_admin_raw(f"target button release {pb}")
+
+    # ── helpers ───────────────────────────────────────────────
+    def _read_until(self, sock, prompt, timeout):
+        if not sock:
+            return ""
+        sock.settimeout(timeout)
+        data = b""
+        try:
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if prompt.encode() in data:
+                    break
+        except Exception:
+            pass
+        sock.settimeout(None)
+        return data.decode("utf-8", errors="replace")
+
+    def delay(self, seconds):
+        self.print(f"[delay {seconds}s]")
+        time.sleep(seconds)
+
+    def print(self, msg):
+        run_room = f"run_{self.run_id}"
+        socketio.emit("run_output",
+                      {"serial": self.serial, "data": str(msg) + "\n", "stream": "script"},
+                      room=run_room)
+
+
+# ── Run pipeline ─────────────────────────────────────────────
+
+def _flash_board(board_cfg, scenario_dir, run_id):
+    serial  = board_cfg.get("_resolved_serial", "")
+    jlink   = str(board_cfg.get("jlink_name_or_ip", "")).strip()
+    print(f"[RUN] _flash_board serial={serial} jlink={jlink}")
+    is_ip   = "." in jlink
+    log     = []
+
+    def run_cmd(cmd):
+        print(f"[RUN] running: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            log.append(" ".join(cmd))
+            print(f"[RUN] returncode={result.returncode} stdout={result.stdout[:100]} stderr={result.stderr[:100]}")
+            if result.returncode != 0:
+                log.append(f"ERROR: {result.stderr.strip()}")
+                return False
+            return True
+        except subprocess.TimeoutExpired:
+            print(f"[RUN] TIMEOUT running: {' '.join(cmd)}")
+            log.append(f"ERROR: timeout after 60s")
+            return False
+        except Exception as e:
+            print(f"[RUN] EXCEPTION: {e}")
+            log.append(f"ERROR: {e}")
+            return False
+
+    conn_flag = ["--ip", jlink] if is_ip else ["-s", jlink]
+
+    if board_cfg.get("masserase", True):
+        print(f"[RUN] starting masserase")
+        if not run_cmd([COMMANDER_PATH, "device", "masserase"] + conn_flag):
+            return False, log
+
+    for s37 in board_cfg.get("s37_files", []):
+        s37_path = os.path.join(scenario_dir, s37)
+        print(f"[RUN] flashing {s37_path}")
+        cmd = [COMMANDER_PATH, "flash", s37_path] + conn_flag
+        if board_cfg.get("halt_reset", False):
+            cmd += ["--halt"]
+        if not run_cmd(cmd):
+            return False, log
+
+    print(f"[RUN] _flash_board done serial={serial}")
+    return True, log
+
+
+def _run_board(board_cfg, scenario_dir, run_id, script_code):
+    serial = board_cfg.get("_resolved_serial", "unknown")
+    print(f"[RUN] _run_board started serial={serial}")
+    run_room = f"run_{run_id}"
+    time.sleep(2.0)
+
+    def emit_status(status, msg=""):
+        active_runs[run_id]["boards"][serial] = status
+        print(f"[RUN] emit_status {serial} → {status} to room run_{run_id}")
+        socketio.emit("run_board_status",
+                      {"serial": serial, "status": status, "msg": msg},
+                      room=run_room)
+
+    emit_status("flashing")
+
+    # Flash
+    ok, flash_log = _flash_board(board_cfg, scenario_dir, run_id)
+    for line in flash_log:
+        socketio.emit("run_output",
+                      {"serial": serial, "data": line + "\n", "stream": "flash"},
+                      room=run_room)
+    if not ok:
+        emit_status("error", "Flash failed")
+        return
+
+    # Get ports
+    emit_status("connecting")
+    try:
+        r     = requests.get(f"{SDM_BASE}/api/adapter/{serial}/get-info", timeout=3)
+        info  = r.json()
+        print(f"[RUN] get-info response: {info.keys()}")
+        adapter = info.get("adapter", {})
+        conns   = info.get("connections", [])
+        print(f"[RUN] connections: {conns}")
+        ports   = {c["portName"]: c["portNumber"] for c in conns}
+        print(f"[RUN] ports: {ports}")
+        connectivity = adapter.get("connectivityType", "usb")
+        host = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
+        vcom_port  = ports.get("serial1")
+        admin_port = ports.get("admin")
+        print(f"[RUN] host={host} vcom={vcom_port} admin={admin_port}")
+        if not vcom_port or not admin_port:
+            emit_status("error", "Could not get ports from SDM")
+            return
+    except Exception as e:
+        print(f"[RUN] get-info exception: {e}")
+        emit_status("error", f"SDM error: {e}")
+        return
+
+    # Create Board instance and connect
+    board = Board(
+        serial       = serial,
+        host         = host,
+        vcom_port    = vcom_port,
+        admin_port   = admin_port,
+        run_id       = run_id,
+        scenario_dir = scenario_dir,
+        open_terminal = board_cfg.get("open_terminal", False)
+    )
+    try:
+        print(f"[RUN] connecting board {serial} host={host} vcom={vcom_port} admin={admin_port}")
+        board.connect()
+        print(f"[RUN] board connected {serial}")
+    except Exception as e:
+        import traceback
+        print(f"[RUN] connect exception: {traceback.format_exc()}")
+        emit_status("error", f"Connection failed: {e}")
+        return
+
+    # Run script
+    print(f"[RUN] board.connect() done for {serial}, starting script")
+    emit_status("running")
+    print(f"[RUN] executing script for {serial}")
+    try:
+        namespace = {
+            "board": board,
+            "time": time,
+            "__builtins__": __builtins__,
+        }
+        exec(script_code, namespace)
+        print(f"[RUN] script exec done, calling script(board)")
+        if "script" in namespace and callable(namespace["script"]):
+            namespace["script"](board)
+        print(f"[RUN] script(board) returned")
+        emit_status("done")
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[RUN] script exception: {tb}")
+        socketio.emit("run_output",
+                      {"serial": serial, "data": tb, "stream": "error"},
+                      room=run_room)
+        emit_status("error", str(e))
+
+
+@app.route("/api/scenario-run", methods=["POST"])
+def scenario_run():
+    base = request.json.get("base", SCENARI_DIR)
+    path = request.json.get("path", "")
+    base = os.path.abspath(base)
+    full = os.path.abspath(os.path.join(base, path))
+
+    if not full.startswith(base) or not os.path.isfile(full):
+        return jsonify({"ok": False, "error": "File not found"}), 400
+
+    scenario_dir = os.path.dirname(full)
+
+    # Parse scenario
+    with open(full) as f:
+        content = f.read()
+    try:
+        scenario = yaml.safe_load(content)
+    except yaml.YAMLError as e:
+        return jsonify({"ok": False, "error": f"YAML error: {e}"}), 400
+
+    boards = scenario.get("boards", [])
+    if not boards:
+        return jsonify({"ok": False, "error": "No boards defined"}), 400
+
+    # Resolve adapter serial numbers from jlink/IP
+    try:
+        adapters_data = requests.get(f"{SDM_BASE}/api/adapters", timeout=3).json()
+        if isinstance(adapters_data, dict):
+            adapters_data = adapters_data.get("adapters", [])
+        adapter_by_host   = {a.get("host"): a for a in adapters_data if a.get("host")}
+        adapter_by_serial = {a.get("serialNumber"): a for a in adapters_data if a.get("serialNumber")}
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Cannot reach SDM: {e}"}), 500
+
+    # Resolve serials and load scripts
+    resolved_boards = []
+    for b in boards:
+        jlink = str(b.get("jlink_name_or_ip", "")).strip()
+        if jlink and jlink.lower() != "none":
+            adapter = adapter_by_host.get(jlink) or adapter_by_serial.get(jlink)
+        else:
+            # Pick any matching board from available
+            board_id = str(b.get("board", "")).strip()
+            adapter = None
+            for a in adapters_data:
+                for ab in a.get("boards", []):
+                    for field in ["id", "shortLabel"]:
+                        val = ab.get(field, "")
+                        if re.sub(r"^BRD", "", val, flags=re.IGNORECASE).upper() == \
+                           re.sub(r"^BRD", "", board_id, flags=re.IGNORECASE).upper():
+                            adapter = a
+                            break
+                if adapter:
+                    break
+
+        if not adapter:
+            return jsonify({"ok": False, "error": f"No adapter found for board {b.get('board', '?')}"}), 400
+
+        bc = dict(b)
+        bc["_resolved_serial"] = adapter.get("serialNumber")
+        resolved_boards.append(bc)
+
+    # Load script file
+    script_file = boards[0].get("script", "")  # use first board's script for now
+    script_code = ""
+    if script_file:
+        script_path = os.path.join(scenario_dir, script_file)
+        if os.path.isfile(script_path):
+            with open(script_path) as f:
+                script_code = f.read()
+    print(f"[RUN] resolved boards: {[b['_resolved_serial'] for b in resolved_boards]}")  # ← here
+    print(f"[RUN] script_file: {script_file}, script_code length: {len(script_code)}")   # ← here
+    # print(f"[RUN] run_id: {run_id}") 
+    # Create run
+    run_id = str(uuid.uuid4())[:8]
+    active_runs[run_id] = {
+        "status": "running",
+        "scenario": path,
+        "boards": {b["_resolved_serial"]: "pending" for b in resolved_boards}
+    }
+
+    # Start parallel threads
+    def run_all():
+        with ThreadPoolExecutor(max_workers=len(resolved_boards)) as executor:
+            futures = [
+                executor.submit(_run_board, bc, scenario_dir, run_id, script_code)
+                for bc in resolved_boards
+            ]
+            for f in as_completed(futures):
+                pass
+        active_runs[run_id]["status"] = "done"
+        socketio.emit("run_done", {"run_id": run_id}, room=f"run_{run_id}")
+
+    threading.Thread(target=run_all, daemon=True).start()
+
+    return jsonify({"ok": True, "run_id": run_id})
+
+
+@app.route("/api/run-status/<run_id>")
+def run_status(run_id):
+    run = active_runs.get(run_id)
+    if not run:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(run)
+
+
+@socketio.on("join_run")
+def handle_join_run(data):
+    run_id = data.get("run_id")
+    join_room(f"run_{run_id}")
+    print(f"[RUN] client joined room run_{run_id}")
+    # Send current state immediately to the newly joined client
+    run = active_runs.get(run_id)
+    if run:
+        for serial, status in run["boards"].items():
+            emit("run_board_status", {"serial": serial, "status": status, "msg": ""})
+        print(f"[RUN] replayed status for {list(run['boards'].keys())}")
+
 # ----------------------------
 if __name__ == "__main__":
     ensure_sdm()

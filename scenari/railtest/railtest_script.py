@@ -8,32 +8,17 @@ from random import randint
 # Script
 #-----------------------------------------------------------
 
-class SCRIPT():
-    def __init__(self, board, interface, address, base_port):   
-        self.board = board
-        self.interface = interface
-        self.ip = address
-        self.base_port = base_port
-         
-    def script(self):
-        t = self.board
-        t.open_board_ports(self.ip,self.base_port)
-        t.reset()
-        print('\nStarting test loop\r\n')
+import time
+from random import randint
 
-        t.command_cli("getchannel")
-        t.command_cli("help")
-        t.command_admin("boardid")
+def script(board):
+    board.config_vcom(line_ending="CRLF", echo=True, prompt=">")
+    board.config_admin(line_ending="CRLF", echo=False, prompt="WSTK>")
 
-
-        # t.read_cli()
-        # time.sleep(randint(1,3))
-        # for i in range(30):
-        #     r = randint(0,8)
-        #     t.write_cli(f"setchannel {r}")
-        #     t.write_cli("settxtone 1")
-        #     time.sleep(1)
-        #     t.write_cli("settxtone 0")
-        
-        t.button(0,0.3)
-        t.close_board_ports()
+    board.reset()
+    board.delay(1.5)  # wait for board to fully boot
+    board.cli("getchannel")
+    board.cli("tx 10")
+    #board.cli("help")
+    board.admin("boardid")
+    board.button(0, 0.3)
