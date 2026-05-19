@@ -880,6 +880,8 @@ class Board:
 
         self._vcom_listeners  = []
         self._admin_listeners = []
+        self._vcom_expecting_echo = [False]  # ← default, always valid
+        self._log_path = None
 
     # ── configuration ────────────────────────────────────────
     def config_vcom(self, line_ending="CRLF", echo=True, prompt=">"):
@@ -941,16 +943,13 @@ class Board:
                     if not chunk:
                         break
                     text = chunk.decode("utf-8", errors="replace")
-                    # Forward to terminal
                     socketio.emit("terminal_output",
                                   {"data": text, "room": room}, room=room)
-                    # Log to file
                     if self._log_path:
                         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                         with open(self._log_path, "a") as f:
                             for line in text.splitlines():
                                 f.write(f"[{ts}][{stream}] {line}\n")
-                    # Notify listeners
                     for listener in list(listeners):
                         try: listener(text)
                         except: pass
@@ -992,15 +991,14 @@ class Board:
         if not self._vcom_sock:
             return ""
         payload = cmd.encode("utf-8") + self._vcom_le
+
+        if self._vcom_echo and hasattr(self, '_vcom_expecting_echo'):
+            self._vcom_expecting_echo[0] = True
         self._vcom_sock.sendall(payload)
 
-        # Echo command to terminal
-        vcom_room = f"{self.serial}_vcom"
-        socketio.emit("terminal_echo",
-                      {"data": f"\u203a {cmd}", "room": vcom_room},
-                      room=vcom_room)
+        # No echo emit — board echoes itself when _vcom_echo=True
+        # and reader thread handles display
 
-        # Wait for prompt using event — reader thread will signal us
         event    = threading.Event()
         response = []
         prompt   = self._vcom_prompt
@@ -1024,7 +1022,7 @@ class Board:
         self._admin_sock.sendall(payload)
         admin_room = f"{self.serial}_admin"
         socketio.emit("terminal_echo",
-                      {"data": f"\u203a {cmd}", "room": admin_room},
+                      {"data": f"{cmd}", "room": admin_room},
                       room=admin_room)
 
     def admin(self, cmd, timeout=10.0):
@@ -1051,7 +1049,7 @@ class Board:
         self._admin_sock.sendall((raw + self._admin_le.decode()).encode("utf-8"))
         admin_room = f"{self.serial}_admin"
         socketio.emit("terminal_echo",
-                      {"data": f"\u203a {raw}", "room": admin_room},
+                      {"data": f"\{raw}", "room": admin_room},
                       room=admin_room)
 
         event    = threading.Event()
