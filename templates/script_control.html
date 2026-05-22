@@ -350,45 +350,27 @@ pre.sc-yaml-content mark.sc-line-error {
     white-space: pre;
 }
 /* ── check report ── */
-.sc-check-report {
-    margin: 10px;
-    border-radius: 12px;
-    overflow: hidden;
-    flex-shrink: 0;
-}
-.sc-check-header {
-    padding: 8px 14px;
-    font-size: 12px;
-    font-weight: 500;
-}
-.sc-check-header.ok      { background: #EAF3DE; color: #3B6D11; border-radius: 12px; }
-.sc-check-header.ok-alone{ border-radius: 12px; }
-.sc-check-header.err     { background: #FCEBEB; color: #A32D2D; border-radius: 12px 12px 0 0; }
-.sc-check-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px 10px;
-    background: #FCEBEB;
-    border-radius: 0 0 12px 12px;
-}
 .sc-check-item {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
-    color: #A32D2D;
-    padding: 4px 8px;
-    background: rgba(255,255,255,.5);
-    border-radius: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: #EFF2F9;
+    box-shadow:
+        inset -2px -2px 4px rgba(250, 251, 255, 1),
+        inset  2px  2px 4px rgba(22, 27, 29, 0.15);
 }
 .sc-check-line {
     display: inline-block;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
-    background: rgba(162,45,45,.15);
-    color: #A32D2D;
+    background: #EFF2F9;
     border-radius: 4px;
     padding: 1px 5px;
     margin-right: 6px;
+    box-shadow:
+        -1px -1px 2px rgba(250, 251, 255, 1),
+         1px  1px 2px rgba(22, 27, 29, 0.20);
 }
 
 
@@ -398,7 +380,8 @@ pre.sc-yaml-content mark.sc-line-error {
     border-radius: 16px;
     width: 480px;
     max-width: 95vw;
-    box-shadow: -8px -8px 20px rgba(250,251,255,1), 8px 8px 20px rgba(22,27,29,0.3);
+    box-shadow:
+         6px  6px 16px rgba(22, 27, 29, 0.23);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -801,10 +784,9 @@ async function onScCheck() {
 function showCheckReport(ok, issues) {
     const errors   = issues.filter(i => i.level === "error");
     const warnings = issues.filter(i => i.level === "warning");
-    const infos    = issues.filter(i => i.level === "info");
     const allOk    = errors.length === 0;
 
-    if (allOk && issues.length === 0) return; // pure success, button flash is enough
+    if (allOk && issues.length === 0) return;
 
     const popup = document.getElementById("scCheckPopup");
     const title = document.getElementById("scCheckPopupTitle");
@@ -822,14 +804,12 @@ function showCheckReport(ok, issues) {
     }
 
     body.innerHTML = issues.map(i => {
-        const lineRef = i.line ? `<span class="sc-check-line">line ${i.line}</span>` : "";
-        const color   = i.level === "error"   ? "#A32D2D" :
-                        i.level === "warning"  ? "#854F0B" : "#6E7F8D";
-        const bg      = i.level === "error"   ? "rgba(226,75,74,0.08)" :
-                        i.level === "warning"  ? "rgba(239,159,39,0.1)" : "transparent";
-        return `<div class="sc-check-item" style="color:${color}; background:${bg};">
-            ${lineRef}${esc(i.msg)}
-        </div>`;
+        const color = i.level === "error"   ? "#A32D2D" :
+                      i.level === "warning"  ? "#854F0B" : "#6E7F8D";
+        const lineRef = i.level !== "info" && i.line
+            ? `<span class="sc-check-line" style="color:${color};">line ${i.line}</span>`
+            : "";
+        return `<div class="sc-check-item" style="color:${color};">${lineRef}${esc(i.msg)}</div>`;
     }).join("");
 
     popup.style.display = "flex";

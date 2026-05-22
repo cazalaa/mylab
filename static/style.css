@@ -570,11 +570,12 @@ button.error {
     display: none;
     position: fixed;
     top: 60px;
-    width: 280px;
-    background: #fff;
-    border: 1px solid #e0dfd9;
-    border-radius: 14px;
-    box-shadow: 0 8px 32px rgba(0,0,0,.12);
+    width: 300px;
+    background: #EFF2F9;
+    border: none;
+    border-radius: 16px;
+    box-shadow:
+        6px  6px 16px rgba(22, 27, 29, 0.23);
     z-index: 100;
     overflow: hidden;
 }
@@ -583,8 +584,8 @@ button.error {
 
 .group-panel-header {
     padding: 10px 14px;
-    border-bottom: 1px solid #e0dfd9;
-    background: #faf9f7;
+    border-bottom: 1px solid rgba(22, 27, 29, 0.08);
+    background: #EFF2F9;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -595,103 +596,111 @@ button.error {
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: .07em;
-    color: #888;
+    color: #8899aa;
 }
 
 .group-close {
-    font-size: 12px; 
-    color: #bbb; 
+    font-size: 12px;
+    color: #8899aa;
     cursor: pointer;
-    padding: 2px 5px; 
+    padding: 2px 5px;
     border-radius: 4px;
-    transition: color .15s, background .15s;
+    transition: color .15s;
 }
 
-.group-close:hover { 
-    color: #A32D2D; 
-    background: #FCEBEB; 
+.group-close:hover {
+    color: #E24B4A;
 }
 
 .group-panel-body { padding: 10px; }
 
-.group-input-row { 
-    display: flex; 
-    gap: 6px; 
-    margin-bottom: 10px; 
+.group-input-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
 }
 
 .group-input {
-    flex: 1; 
-    height: 28px; 
+    flex: 1;
+    height: 30px;
     padding: 0 10px;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
-    border: 1px solid #d0cfc9; 
+    border: none;
     border-radius: 8px;
-    background: #faf9f7; 
-    color: #1a1a1a; 
+    background: #EFF2F9;
+    color: #4a5a68;
     outline: none;
+    box-shadow:
+        inset -2px -2px 4px rgba(250, 251, 255, 1),
+        inset  2px  2px 4px rgba(22, 27, 29, 0.18);
 }
 
-.group-input:focus { 
-    border-color: #888; 
-    background: #fff; 
+.group-input:focus {
+    box-shadow:
+        inset -2px -2px 4px rgba(250, 251, 255, 1),
+        inset  2px  2px 6px rgba(22, 27, 29, 0.25);
 }
 
-.group-list { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 5px; 
-    max-height: 220px; 
-    overflow-y: auto; 
+.group-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow-y: auto;
 }
 
 .group-item {
-    display: flex; 
-    align-items: center; 
+    display: flex;
+    align-items: center;
     gap: 6px;
-    padding: 7px 10px;
-    border: 1px solid #e0dfd9; 
-    border-radius: 8px;
-    cursor: pointer; 
-    transition: background .15s;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    background: #EFF2F9;
+    transition: box-shadow .15s;
+    box-shadow:
+        -3px -3px 6px rgba(250, 251, 255, 1),
+         3px  3px 6px rgba(22, 27, 29, 0.20);
 }
 
-.group-item:hover { 
-    background: #f4f3f0; 
+.group-item:hover {
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.26);
 }
 
-.group-item-name  { 
-    font-family: 'IBM Plex Mono', monospace; 
-    font-size: 12px; 
-    color: #1a1a1a; 
-    flex: 1; 
+.group-item-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #4a5a68;
+    flex: 1;
 }
 
-.group-item-count { 
-    font-size: 10px; 
-    color: #aaa; 
+.group-item-count {
+    font-size: 10px;
+    color: #8899aa;
 }
 
 .group-item-del {
-    font-size: 11px; 
-    color: #ccc; 
+    font-size: 11px;
+    color: #b5bfc6;
     cursor: pointer;
-    padding: 2px 4px; 
+    padding: 2px 4px;
     border-radius: 4px;
-    transition: color .15s, background .15s;
+    transition: color .15s;
 }
 
-.group-item-del:hover { 
-    color: #A32D2D; 
-    background: #FCEBEB; 
+.group-item-del:hover {
+    color: #E24B4A;
 }
 
-.group-empty { 
-    text-align: center; 
-    font-size: 12px; 
-    color: #bbb; 
-    padding: 18px 0; 
+.group-empty {
+    text-align: center;
+    font-size: 12px;
+    color: #b5bfc6;
+    padding: 18px 0;
 }
 
 /* ── error report ── */
