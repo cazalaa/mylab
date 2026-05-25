@@ -389,7 +389,8 @@ def terminal_info(serial):
         return jsonify({"error": str(e)}), 500
 
 # ── WebSocket telnet bridge ────────────────────────
-active_telnets = {}  # room_id -> telnetlib.Telnet
+active_telnets = {}  # room_id -> socket
+active_boards  = {}  # room_id -> current Board instance (updated each run)
 
 @socketio.on("connect_telnet")
 def handle_connect_telnet(data):
@@ -914,10 +915,14 @@ class Board:
             (vcom_room,  self.vcom_port,  "_vcom_sock"),
             (admin_room, self.admin_port, "_admin_sock"),
         ]:
+            # Always register this Board as the active dispatcher for this room.
+            # The reader thread uses active_boards[room] at dispatch time, so
+            # reusing a socket across runs automatically picks up the new Board.
+            active_boards[room] = self
+
             if room in active_telnets:
                 setattr(self, attr, active_telnets[room])
                 print(f"[RUN] reusing existing connection for {room}")
-                # Notify any terminal window that may be listening
                 socketio.emit("terminal_ready", {"room": room}, room=room)
             else:
                 s = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
@@ -942,10 +947,8 @@ class Board:
             threading.Thread(target=_open, daemon=True).start()
 
     def _start_reader(self, sock, room):
-        run_room = f"run_{self.run_id}"
-        is_vcom  = room.endswith("_vcom")
-        stream   = "vcom" if is_vcom else "admin"
-        listeners = self._vcom_listeners if is_vcom else self._admin_listeners
+        is_vcom = room.endswith("_vcom")
+        stream  = "vcom" if is_vcom else "admin"
 
         def reader():
             while True:
@@ -956,17 +959,24 @@ class Board:
                     text = chunk.decode("utf-8", errors="replace")
                     socketio.emit("terminal_output",
                                   {"data": text, "room": room}, room=room)
-                    if self._log_path:
-                        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        with open(self._log_path, "a") as f:
-                            for line in text.splitlines():
-                                f.write(f"[{ts}][{stream}] {line}\n")
-                    for listener in list(listeners):
-                        try: listener(text)
-                        except: pass
+                    # Always look up the *current* Board for this room so that
+                    # a second run (new Board instance, reused socket) gets its
+                    # listeners dispatched correctly.
+                    board = active_boards.get(room)
+                    if board:
+                        if board._log_path:
+                            ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                            with open(board._log_path, "a") as f:
+                                for line in text.splitlines():
+                                    f.write(f"[{ts}][{stream}] {line}\n")
+                        listeners = board._vcom_listeners if is_vcom else board._admin_listeners
+                        for listener in list(listeners):
+                            try: listener(text)
+                            except: pass
                 except Exception:
                     break
             active_telnets.pop(room, None)
+            active_boards.pop(room, None)
 
         threading.Thread(target=reader, daemon=True).start()
 
@@ -1007,16 +1017,14 @@ class Board:
             self._vcom_expecting_echo[0] = True
         self._vcom_sock.sendall(payload)
 
-        # No echo emit — board echoes itself when _vcom_echo=True
-        # and reader thread handles display
-
         event    = threading.Event()
         response = []
         prompt   = self._vcom_prompt
 
         def on_data(data):
             response.append(data)
-            if prompt in data:
+            combined = "".join(response)
+            if prompt in combined:
                 event.set()
 
         self._vcom_listeners.append(on_data)
@@ -1069,7 +1077,8 @@ class Board:
 
         def on_data(data):
             response.append(data)
-            if prompt in data:
+            combined = "".join(response)
+            if prompt in combined:
                 event.set()
 
         self._admin_listeners.append(on_data)
@@ -1093,21 +1102,27 @@ class Board:
 
     # ── helpers ───────────────────────────────────────────────
     def _read_until(self, sock, prompt, timeout):
+        """Read from sock until prompt is found or timeout expires.
+        Uses a deadline loop so partial chunks are accumulated correctly."""
         if not sock:
             return ""
-        sock.settimeout(timeout)
+        deadline = time.monotonic() + timeout
         data = b""
+        prompt_b = prompt.encode("utf-8")
+        sock.settimeout(0.1)
         try:
-            while True:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
-                if prompt.encode() in data:
-                    break
-        except Exception:
-            pass
-        sock.settimeout(None)
+            while time.monotonic() < deadline:
+                try:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                    if prompt_b in data:
+                        break
+                except OSError:
+                    pass  # timeout on this recv slice, keep looping
+        finally:
+            sock.settimeout(None)
         return data.decode("utf-8", errors="replace")
 
     def delay(self, seconds):
