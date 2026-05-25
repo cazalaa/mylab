@@ -942,3 +942,83 @@ button.error {
     background: rgba(255,255,255,.5);
     border-radius: 6px;
 }
+/* ── Manual Control : cards ── */
+#testSourceBtn {
+    height: 36px;
+    padding: 0 20px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #EFF2F9;
+    color: #6E7F8D;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: box-shadow .2s, color .2s;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+#testSourceBtn::before { content: "▾"; font-size: 10px; opacity: .7; }
+#testSourceBtn:hover   { color: #4a5a68; }
+
+.test-card-buttons {
+    padding: 14px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: #EFF2F9;
+}
+
+.test-btn-half {
+    flex: 1;
+    height: 34px;
+    border-radius: 10px;
+    border: none;
+    background: #EFF2F9;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6E7F8D;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow .15s, color .15s;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+.test-btn-half:hover  { color: #4a5a68; }
+.test-btn-half:active {
+    color: #4a5a68;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.23);
+}
+.test-btn-half:disabled { opacity: .45; pointer-events: none; }
+.test-btn-hidden { visibility: hidden; }
+
+.test-card {
+    width: 250px;
+    background: #EFF2F9;
+    border: none;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow:
+        -8px -8px 16px rgba(250, 251, 255, 1),
+         8px  8px 16px rgba(22, 27, 29, 0.23);
+}
+.test-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 14px;
+    background: #EFF2F9;
+    border-bottom: 1px solid rgba(22, 27, 29, 0.08);
+}

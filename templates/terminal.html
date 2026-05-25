@@ -456,11 +456,6 @@ function switchTab(kind) {
 }
 
 // ── status dots ───────────────────────────────────
-function setStatus(kind, state) {
-    const el = document.getElementById(`status${cap(kind)}`);
-    if (el) el.className = `term-tab-status ${state}`;
-}
-
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 function setStatus(kind, state) {

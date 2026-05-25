@@ -3,31 +3,99 @@ import time
 import requests
 import configparser
 import os
-from flask import Flask, jsonify, render_template, request 
+import sys
+import shutil
+import json
+import glob
+import threading
+import datetime
+import re
+import uuid
+import yaml
+import serial
+import serial.tools.list_ports
+from pathlib import Path
+from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO, emit, join_room
 import socket as sock_module
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
-import glob
 import webview
-import threading
-import glob as glob_module
-import serial.tools.list_ports 
-import pty, os, termios
-import yaml
-import datetime
-import re
 
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-GROUPS_DIR = os.path.dirname(os.path.abspath(__file__))
-SCENARI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenari")
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR    = os.path.join(_BASE_DIR, "logs")
+GROUPS_DIR = os.path.join(_BASE_DIR, "groups")
+SCENARI_DIR = os.path.join(_BASE_DIR, "scenari")
+
+os.makedirs(GROUPS_DIR, exist_ok=True)
 
 # Dimensions
 WIN_W          = 800
 WIN_COLLAPSED  = 65   # hauteur barre compacte
 WIN_EXPANDED   = 700   # hauteur dépliée
 
-from binresolve import resolve_sdm, resolve_commander
+# ----------------------------
+# BINRESOLVE (intégré)
+# ----------------------------
+_SILABS_ROOT    = Path.home() / ".silabs"
+_IS_WINDOWS     = sys.platform == "win32"
+_IS_MAC         = sys.platform == "darwin"
+_SDM_NAME       = "sdm.exe"       if _IS_WINDOWS else "sdm"
+_COMMANDER_NAME = "commander.exe" if _IS_WINDOWS else "commander"
+
+# Chemins fallback par plateforme (utilisés uniquement si auto-détection échoue)
+if _IS_WINDOWS:
+    _DEFAULT_SDM       = str(Path.home() / "AppData/Local/silabs/slt/installs/archive/sdm-win32-x64/sdm.exe")
+    _DEFAULT_COMMANDER = str(Path.home() / "AppData/Local/silabs/Commander/commander.exe")
+elif _IS_MAC:
+    _DEFAULT_SDM       = str(Path.home() / ".silabs/slt/installs/archive/sdm-darwin-arm64/sdm")
+    _DEFAULT_COMMANDER = str(Path.home() / ".silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander")
+else:  # Linux
+    _DEFAULT_SDM       = str(Path.home() / ".silabs/slt/installs/archive/sdm-linux-x64/sdm")
+    _DEFAULT_COMMANDER = str(Path.home() / ".silabs/slt/installs/archive/commander-linux-x64/commander")
+
+def _is_exec(p: str) -> bool:
+    pp = Path(p)
+    if not pp.exists():
+        return False
+    if _IS_WINDOWS:
+        return True
+    return os.access(str(pp), os.X_OK)
+
+def _find_in_silabs(name: str) -> str | None:
+    if not _SILABS_ROOT.exists():
+        return None
+    candidates = sorted(_SILABS_ROOT.rglob(name), key=lambda p: p.stat().st_mtime, reverse=True)
+    for candidate in candidates:
+        if _is_exec(str(candidate)):
+            print(f"[INFO] {name} trouvé via ~/.silabs : {candidate}")
+            return str(candidate)
+    return None
+
+def resolve_sdm(path: str | None) -> str | None:
+    if path and _is_exec(path):
+        return path
+    envp = os.environ.get("SDM_BIN")
+    if envp and _is_exec(envp):
+        return envp
+    if _is_exec(_DEFAULT_SDM):
+        return _DEFAULT_SDM
+    p = shutil.which("sdm")
+    if p and _is_exec(p):
+        return p
+    return _find_in_silabs(_SDM_NAME)
+
+def resolve_commander(path: str | None) -> str | None:
+    if path and _is_exec(path):
+        return path
+    envp = os.environ.get("COMMANDER_BIN")
+    if envp and _is_exec(envp):
+        return envp
+    if _is_exec(_DEFAULT_COMMANDER):
+        return _DEFAULT_COMMANDER
+    p = shutil.which("commander")
+    if p and _is_exec(p):
+        return p
+    return _find_in_silabs(_COMMANDER_NAME)
 
 CONFIG_FILE = "config.ini"
 ALLOWED_PAGES = {"maintenance", "manual_control", "script_control"}
@@ -98,14 +166,6 @@ def get_adapters():
 def extract_board_label(a):
     boards = a.get("boards") or []
     return boards[0].get("label", "") if boards else ""
-
-def get_adapter_info(serial: str) -> dict:
-    try:
-        r = requests.get(f"{SDM_BASE}/api/adapter/{serial}/get-info", timeout=3)
-        return r.json().get("adapter", {})
-    except requests.RequestException as e:
-        print(f"[WARN] get-info {serial}: {e}")
-        return {}
 
 def extract_board(a):
     boards = a.get("boards") or []
@@ -273,22 +333,13 @@ class WindowAPI:
     def open_terminal(self, serial):
         """Appelé depuis le JS via pywebview.api.open_terminal(serial)"""
         def _open():
-            # Récupérer les infos de l'adapter
-            try:
-                r = requests.get(f"{SDM_BASE}/api/adapter/{serial}/get-info", timeout=3)
-                info = r.json().get("adapter", {})
-            except Exception:
-                info = {}
-
             url = f"http://127.0.0.1:{WEB_PORT}/terminal/{serial}"
-            win = webview.create_window(
+            webview.create_window(
                 f"{serial} — Terminal",
                 url,
                 width=820, height=520,
                 resizable=True
             )
-        # create_window doit être appelé depuis le thread pywebview
-        webview.windows[0].evaluate_js("")  # assure qu'on est prêt
         threading.Thread(target=_open, daemon=True).start()
 
 # ── terminal page ──────────────────────────────────
@@ -315,22 +366,13 @@ def terminal_info(serial):
         admin_port = ports.get("admin")
         print(f"[INFO] terminal-info {serial}: vcom={vcom_port} admin={admin_port}")
 
-        # Si pas de ports réseau → chercher TTY USB
+        # Si pas de ports réseau → chercher port série USB (cross-platform)
         tty_path = None
         if not vcom_port and connectivity == "usb":
-            candidates = (
-                glob_module.glob("/dev/tty.usbmodem*") +
-                glob_module.glob("/dev/cu.usbmodem*")
-            )
-            for c in candidates:
-                if serial.lower() in c.lower():
-                    tty_path = c
+            for port in serial.tools.list_ports.comports():
+                if serial.lower() in (port.serial_number or "").lower():
+                    tty_path = port.device
                     break
-            if not tty_path:
-                for port in serial.tools.list_ports.comports():
-                    if serial.lower() in (port.serial_number or "").lower():
-                        tty_path = port.device
-                        break
 
         return jsonify({
             "serial":       serial,
@@ -368,22 +410,8 @@ def handle_connect_telnet(data):
         tn.connect((host, port))
         tn.settimeout(None)
         print(f"[TELNET] connected: {room}")
-        # Lire le banner initial
-        import time
-        time.sleep(0.2)
-        banner = b""
-        tn.setblocking(False)
-        try:
-            print(f"[TELNET] banner received: {len(banner)} bytes: {banner[:50]}")
-        except Exception as be:
-            print(f"[TELNET] no banner: {be}")
-        tn.setblocking(True)
 
         active_telnets[room] = tn
-        if banner:
-            socketio.emit("terminal_output",
-                        {"data": banner.decode("utf-8", errors="replace"), "room": room},
-                        room=room)
 
         def reader():
             print(f"[TELNET] reader started: {room}")
@@ -410,16 +438,6 @@ def handle_connect_telnet(data):
         print(f"[TELNET] connection failed: {room}: {e}")
         emit("terminal_error", {"message": str(e)})
 
-@socketio.on("terminal_input")
-def handle_terminal_input(data):
-    room = data["room"]
-    tn   = active_telnets.get(room)
-    if tn:
-        try:
-            tn.sendall(data["data"].encode("utf-8"))
-        except Exception as e:
-            emit("terminal_error", {"message": str(e)})
-
 @socketio.on("disconnect_telnet")
 def handle_disconnect_telnet(data):
     room = data.get("room")
@@ -438,8 +456,7 @@ def handle_connect_tty(data):
         return
 
     try:
-        import serial as pyserial
-        ser = pyserial.Serial(tty_path, baudrate=115200, timeout=0)
+        ser = serial.Serial(tty_path, baudrate=115200, timeout=0)
         active_telnets[room] = ser
 
         def reader():
@@ -601,10 +618,6 @@ def scenario_save():
         f.write(content)
     return jsonify({"ok": True})
 
-import yaml
-
-import re as re_module
-
 @app.route("/api/scenario-check", methods=["POST"])
 def scenario_check():
     base     = request.json.get("base", SCENARI_DIR)
@@ -648,7 +661,7 @@ def scenario_check():
             return False
 
     def is_valid_serial(s):
-        return re_module.match(r"^\d{9}$", str(s)) is not None
+        return re.match(r"^\d{9}$", str(s)) is not None
     # Parse YAML
     try:
         scenario = yaml.safe_load(content)
@@ -721,7 +734,7 @@ def scenario_check():
                           f"'{jlink}' not found in available adapters")
                 elif board_id:
                     # Check if board matches
-                    yaml_board_norm     = re_module.sub(r'^BRD', '', str(board_id), flags=re_module.IGNORECASE)
+                    yaml_board_norm     = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE)
 
                     adapter_boards = matched_adapter.get("boards", [])
                     adapter_board_ids = set()
@@ -729,13 +742,13 @@ def scenario_check():
                         for field in ["id", "shortLabel", "label", "pn"]:
                             val = ab.get(field, "")
                             if val:
-                                normalized = re_module.sub(r'^BRD', '', val.split()[0], flags=re_module.IGNORECASE).upper()
+                                normalized = re.sub(r'^BRD', '', val.split()[0], flags=re.IGNORECASE).upper()
                                 adapter_board_ids.add(normalized)
 
                     if yaml_board_norm not in adapter_board_ids:
                         nickname = matched_adapter.get("nickname") or matched_adapter.get("serialNumber", "")
                         best_id  = adapter_boards[0].get("shortLabel", adapter_boards[0].get("id", "?")) if adapter_boards else "?"
-                        best_short = re_module.sub(r'^BRD', '', best_id, flags=re_module.IGNORECASE)
+                        best_short = re.sub(r'^BRD', '', best_id, flags=re.IGNORECASE)
                         issue("board",
                               f"adapter '{jlink}' ({nickname}) has board '{best_short}' "
                               f"but scenario specifies '{yaml_board_norm}'. "
@@ -743,14 +756,14 @@ def scenario_check():
         # If board_id set but no jlink — check if an available adapter has that board
 # If board_id set but no jlink — check if an available adapter has that board
         if board_id and not jlink:
-            yaml_board_norm = re_module.sub(r'^BRD', '', str(board_id), flags=re_module.IGNORECASE).upper()
+            yaml_board_norm = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE).upper()
             matching = []
             for a in adapters_data:
                 adapter_boards = a.get("boards", [])
                 for ab in adapter_boards:
                     for field in ["id", "shortLabel"]:
                         val = ab.get(field, "")
-                        normalized = re_module.sub(r'^BRD', '', val.split()[0] if val else "", flags=re_module.IGNORECASE).upper()
+                        normalized = re.sub(r'^BRD', '', val.split()[0] if val else "", flags=re.IGNORECASE).upper()
                         if normalized == yaml_board_norm:
                             matching.append(a)
                             break
@@ -842,9 +855,6 @@ def scenario_copy_file():
 # ============================================================
 # Board class + Run pipeline
 # ============================================================
-
-import uuid
-import importlib.util
 
 active_runs = {}  # run_id -> {status, boards: {serial: status}}
 
@@ -1050,7 +1060,7 @@ class Board:
         self._admin_sock.sendall((raw + self._admin_le.decode()).encode("utf-8"))
         admin_room = f"{self.serial}_admin"
         socketio.emit("terminal_echo",
-                      {"data": f"\{raw}", "room": admin_room},
+                      {"data": f"\\{raw}", "room": admin_room},
                       room=admin_room)
 
         event    = threading.Event()
@@ -1125,7 +1135,7 @@ def get_log_file(serial):
     n = len(existing) + 1
     return os.path.join(LOG_DIR, f"{serial}_{dt}_{n:03d}.log")
 
-def _flash_board(board_cfg, scenario_dir, run_id):
+def _flash_board(board_cfg, scenario_dir):
     serial  = board_cfg.get("_resolved_serial", "")
     jlink   = str(board_cfg.get("jlink_name_or_ip", "")).strip()
     print(f"[RUN] _flash_board serial={serial} jlink={jlink}")
@@ -1201,7 +1211,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         f.write(f"# Started: {datetime.datetime.now().isoformat()}\n")
         f.write(f"# {'='*60}\n\n")
     # Flash
-    ok, flash_log = _flash_board(board_cfg, scenario_dir, run_id)
+    ok, flash_log = _flash_board(board_cfg, scenario_dir)
     for line in flash_log:
         log("flash", line)
         socketio.emit("run_output",
@@ -1353,9 +1363,6 @@ def scenario_run():
         if os.path.isfile(script_path):
             with open(script_path) as f:
                 script_code = f.read()
-    print(f"[RUN] resolved boards: {[b['_resolved_serial'] for b in resolved_boards]}")  # ← here
-    print(f"[RUN] script_file: {script_file}, script_code length: {len(script_code)}")   # ← here
-    # print(f"[RUN] run_id: {run_id}") 
     # Create run
     run_id = str(uuid.uuid4())[:8]
     active_runs[run_id] = {

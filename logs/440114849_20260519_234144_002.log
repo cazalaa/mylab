@@ -1,9 +1,0 @@
-# Run: f382007a
-# Serial: 440114849
-# Scenario: /Users/jerome/travail/mylab/scenari/railtest
-# Started: 2026-05-19T23:41:46.842092
-# ============================================================
-
-[23:41:46.950][flash] /Users/jerome/.silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander device masserase -s None
-[23:41:46.951][flash] ERROR: 
-[23:41:46.951][error] Flash failed
