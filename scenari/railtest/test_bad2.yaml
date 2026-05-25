@@ -1,9 +1,0 @@
-boards:
-  - board: 4162A
-    jlink_name_or_ip: 
-    masserase: true
-    halt_reset: false
-    open_terminal: true
-    s37_files: 
-      - rail.s37
-    script: ""

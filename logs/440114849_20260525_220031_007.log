@@ -1,0 +1,9 @@
+# Run: dc733bb7
+# Serial: 440114849
+# Scenario: /Users/jerome/travail/mylab/scenari/railtest
+# Started: 2026-05-25T22:00:33.057467
+# ============================================================
+
+[22:00:33.103][flash] /Users/jerome/.silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander device masserase -s 440114849
+[22:00:33.103][flash] ERROR: 
+[22:00:33.104][error] Flash failed

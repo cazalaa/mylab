@@ -337,7 +337,7 @@ class WindowAPI:
             webview.create_window(
                 f"{serial} — Terminal",
                 url,
-                width=820, height=520,
+                width=820, height=620,
                 resizable=True
             )
         threading.Thread(target=_open, daemon=True).start()
@@ -815,7 +815,8 @@ def scenario_check():
         issues.append({"line": find_line("nickname"), "msg": "Duplicate nicknames in scenario", "level": "error"})
 
     # ── global script (optional) ──────────────────────────────
-    global_script = str(scenario.get("script", "")).strip()
+    global_script = scenario.get("script")
+    global_script = str(global_script).strip() if global_script and str(global_script).strip().lower() not in ("none", "null", "") else ""
     if global_script:
         gsp = os.path.join(scenario_dir, global_script)
         if not os.path.isfile(gsp):
@@ -1195,7 +1196,7 @@ class Board:
                 webview.create_window(
                     f"{self.serial} — Terminal",
                     url,
-                    width=820, height=520,
+                    width=820, height=620,
                     resizable=True
                 )
             threading.Thread(target=_open, daemon=True).start()
@@ -1641,16 +1642,28 @@ def scenario_run():
         else:
             board_id = str(b.get("board", "")).strip()
             adapter = None
-            for a in adapters_data:
-                for ab in a.get("boards", []):
-                    for field in ["id", "shortLabel"]:
-                        val = ab.get(field, "")
-                        if re.sub(r"^BRD", "", val, flags=re.IGNORECASE).upper() == \
-                           re.sub(r"^BRD", "", board_id, flags=re.IGNORECASE).upper():
-                            adapter = a
+            if board_id:
+                # Try to match by board type
+                norm_id = re.sub(r"^BRD", "", board_id, flags=re.IGNORECASE).upper()
+                for a in adapters_data:
+                    for ab in a.get("boards", []):
+                        for field in ["id", "shortLabel"]:
+                            val = ab.get(field, "")
+                            if re.sub(r"^BRD", "", val, flags=re.IGNORECASE).upper() == norm_id:
+                                adapter = a
+                                break
+                        if adapter:
                             break
-                if adapter:
-                    break
+                    if adapter:
+                        break
+            # No board_id or no match by type → pick first available adapter
+            if not adapter and adapters_data:
+                adapter = adapters_data[0]
+            # If the chosen adapter is reachable via IP, use that instead of USB serial
+            if adapter:
+                adapter_host = adapter.get("host", "").strip()
+                if adapter_host:
+                    connection = adapter_host
 
         if not adapter:
             return jsonify({"ok": False, "error": f"No adapter found for board entry {b.get('board', '?')}"}), 400
@@ -1672,7 +1685,8 @@ def scenario_run():
         return jsonify({"ok": False, "error": "Duplicate nicknames in scenario"}), 400
 
     # Global script (optional)
-    global_script_file = scenario_yaml.get("script", "")
+    global_script_file = scenario_yaml.get("script")
+    global_script_file = str(global_script_file).strip() if global_script_file and str(global_script_file).strip().lower() not in ("none", "null", "") else ""
     global_script_code = None
     if global_script_file:
         gsp = os.path.join(scenario_dir, global_script_file)

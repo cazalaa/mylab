@@ -98,18 +98,22 @@ body {
 .term-pane {
     flex: 1;
     display: none;
-    overflow: hidden;
     min-height: 0;
+    /* wrapper: rounded corners + neumorphic shadow + padding */
     border-radius: 14px;
     box-shadow:
         inset -4px -4px 8px rgba(250, 251, 255, 1),
         inset  4px  4px 8px rgba(22, 27, 29, 0.18);
+    overflow: hidden;
+    padding: 8px 0 8px;
+    background: #1a1a1a;
+    box-sizing: border-box;
 }
 .term-pane.active { display: flex; flex-direction: column; }
 
-/* xterm fills the pane */
-.term-pane .xterm          { flex: 1; min-height: 0; border-radius: 14px; }
-.term-pane .xterm-viewport { overflow-y: scroll !important; border-radius: 14px; }
+/* xterm fills the padded inner area exactly */
+.term-pane .xterm          { flex: 1; min-height: 0; overflow: hidden; }
+.term-pane .xterm-viewport { overflow-y: scroll !important; }
 
 /* scrollbar */
 .term-pane .xterm-viewport::-webkit-scrollbar       { width: 6px; }
@@ -123,7 +127,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 12px;
-    padding: 6px 16px 4px;
+    padding: 6px 16px 8px;
     background: #EFF2F9;
     flex-shrink: 0;
 }
@@ -370,18 +374,35 @@ function termConfig() {
 }
 
 function fitTerm(term, pane) {
-    const lineHeight = Math.ceil(term.options.fontSize * 1.5);
-    const cols = Math.max(40, Math.floor((pane.clientWidth  - 16) / (term.options.fontSize * 0.6)));
-    const rows = Math.max(10, Math.floor((pane.clientHeight - 16) / lineHeight));
-    term.resize(cols, rows);
+    const rect = pane.getBoundingClientRect();
+    const W = rect.width;
+    const H = rect.height - 16; // subtract top+bottom padding (8+8)
+    if (!W || !H) return;
+    const core  = term._core;
+    const dims  = core && core._renderService && core._renderService.dimensions;
+    const charW = dims ? dims.css.cell.width  : term.options.fontSize * 0.601;
+    const charH = dims ? dims.css.cell.height : term.options.fontSize * 1.5;
+    if (!charW || !charH) return;
+    const cols = Math.max(40, Math.floor(W / charW));
+    const rows = Math.max(8,  Math.ceil(H / charH));  // ceil fills to bottom
+    if (term.cols !== cols || term.rows !== rows) {
+        term.resize(cols, rows);
+    }
+}
+
+function attachFit(term, pane) {
+    requestAnimationFrame(() => requestAnimationFrame(() => fitTerm(term, pane)));
+    if (window.ResizeObserver) {
+        new ResizeObserver(() => fitTerm(term, pane)).observe(pane);
+    }
 }
 
 function createTerminal(kind, paneId, host, port) {
     const pane = document.getElementById(paneId);
     const term = new Terminal(termConfig());
     term.open(pane);
-    fitTerm(term, pane);
     terminals[kind] = { term, pane };
+    attachFit(term, pane);
 
     const room = `${serial}_${kind}`;
     setStatus(kind, "connecting");
@@ -403,8 +424,8 @@ function createTerminalTTY(kind, paneId, tty) {
     const pane = document.getElementById(paneId);
     const term = new Terminal(termConfig());
     term.open(pane);
-    fitTerm(term, pane);
     terminals[kind] = { term, pane };
+    attachFit(term, pane);
 
     const room = `${serial}_${kind}`;
     setStatus(kind, "connecting");
@@ -462,10 +483,18 @@ function setStatus(kind, state) {
     const el = document.getElementById(`status${cap(kind)}`);
     if (el) el.className = `term-tab-status ${state}`;
 
-    // Afficher la barre d'actions si admin est connecté
+    // Show action bar when admin is connected, then refit all terminals
     if (kind === "admin") {
         const bar = document.getElementById("termActionBar");
-        if (bar) bar.style.display = state === "connected" ? "flex" : "none";
+        if (bar) {
+            bar.style.display = state === "connected" ? "flex" : "none";
+            // Refit after layout recalculates with/without the bar
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    Object.values(terminals).forEach(({ term, pane }) => fitTerm(term, pane));
+                });
+            });
+        }
     }
 }
 
@@ -487,8 +516,7 @@ async function termPb(pb) {
 }
 // ── resize ────────────────────────────────────────
 window.addEventListener("resize", () => {
-    const t = terminals[activeTab];
-    if (t) fitTerm(t.term, t.pane);
+    Object.values(terminals).forEach(({ term, pane }) => fitTerm(term, pane));
 });
 
 // ── start ─────────────────────────────────────────

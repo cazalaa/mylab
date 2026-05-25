@@ -1,0 +1,60 @@
+# Run: 59b4e850
+# Serial: 440114849
+# Scenario: /Users/jerome/travail/mylab/scenari/railtest
+# Started: 2026-05-25T21:58:50.612271
+# ============================================================
+
+[21:58:56.926][flash] /Users/jerome/.silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander device masserase --ip 192.168.0.94
+[21:58:56.927][flash] /Users/jerome/.silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander flash /Users/jerome/travail/mylab/scenari/railtest/rail_soc_railtest_4162A.s37 --ip 192.168.0.94
+[21:58:56.941][admin] Toggling reset with 100 ms delay.
+[21:58:57.041][admin] WSTK> 
+[21:58:58.047][script] [delay 1.5s]
+[21:58:58.107][vcom] 
+[21:58:58.107][vcom] {{(reset)}{App:RAILtest}{Built:May 19 2026 21:48:48}{Cause:0x500}{Brd:BRD4162A}}
+[21:58:58.107][vcom] {{(radio)}{FreqHz:38400000}{ModuleInfo:0xffffffff}}
+[21:58:58.107][vcom] {{(system)}{Family:EFR32XG12}{Fam#:36}{ChipRev:1.1}{sdid:84}
+[21:58:58.109][vcom] {Part:0x031c014c}}
+[21:58:58.109][vcom] {{(pti)}{mode:2-wire-UART}{baud:1600000}{protocol:0}{radioConfig:0x00}}
+[21:58:58.109][vcom] > 
+[21:58:59.560][vcom] getchannel
+[21:58:59.560][vcom] 
+[21:58:59.560][vcom] {{(getchannel)}{channel:0}}
+[21:58:59.565][vcom] > 
+[21:58:59.575][vcom] tx 1
+[21:58:59.575][vcom] 
+[21:58:59.575][vcom] {{(tx)}{PacketTx:Enable
+[21:58:59.578][vcom] d}{None:Disabled}{Time:1502492}}
+[21:58:59.581][vcom] 
+[21:58:59.581][vcom] > {{(appMode)}{None:Ena
+[21:58:59.582][vcom] bled}{PacketTx:Disabled}{Time:15
+[21:58:59.586][vcom] 07710}}
+[21:58:59.586][vcom] {{(txEnd)}{txStat
+[21:58:59.587][admin] ------ BOARDID board list ------
+[21:58:59.590][vcom] us:Complete}{transmitted:1}{last
+[21:58:59.592][vcom] TxTime:1507637}{timePos:6
+[21:58:59.594][vcom] }{durationUs:201}{lastTxStart:15
+[21:58:59.595][vcom] 07436}{ccaSuccess:0}{faile
+[21:58:59.599][vcom] d:0}{lastTxStatus:0x000000000}{t
+[21:58:59.600][vcom] xRemain:0}{isAck:False}}
+[21:58:59.605][vcom] 
+[21:58:59.623][admin]   [A0h]  BRD4001A   Rev. A01
+[21:58:59.623][admin]   [A2h]  BRD4162A   Rev. A01
+[21:58:59.623][admin] WSTK> 
+[21:58:59.628][admin] PB0 is pressed
+[21:58:59.628][admin] WSTK> 
+[21:58:59.939][admin] PB0 is released
+[21:58:59.939][admin] WSTK> 
+[21:58:59.944][vcom] {{(appMode)}{PacketTx:Enabled}{N
+[21:58:59.946][vcom] one:Disabled}{Time:1
+[21:58:59.948][vcom] 869961}}
+[21:58:59.948][vcom] {{(appMode)}{None:Enab
+[21:58:59.951][vcom] led}{PacketTx:Disabled}
+[21:58:59.952][vcom] {Time:1875612}}
+[21:58:59.952][vcom] {{(txEnd)}{txSt
+[21:58:59.956][vcom] atus:Complete}{transmitted
+[21:58:59.957][vcom] :1}{lastTxTime:1875523}{timePos:
+[21:58:59.961][vcom] 6}{durationUs:202}{lastTx
+[21:58:59.962][vcom] Start:1875321}{ccaSuccess:0}{fai
+[21:58:59.966][vcom] led:0}{lastTxStatus:0x0000
+[21:58:59.967][vcom] 00000}{txRemain:0}{isAck:False}}
+[21:58:59.970][vcom] 
