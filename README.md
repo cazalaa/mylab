@@ -76,8 +76,35 @@ web_port = 8080   # port interne Flask
 
 ## Lancement
 
+Les scripts `mylab.sh` (macOS/Linux) et `mylab.bat` (Windows) gèrent l'installation, le nettoyage et le démarrage.
+
+### macOS / Linux
+
 ```bash
-python3 my_lab.py
+# Rendre le script exécutable (une seule fois)
+chmod +x mylab.sh
+
+# Installer le venv et les dépendances
+./mylab.sh --install
+
+# Lancer l'application
+./mylab.sh
+
+# Nettoyer les logs et groupes sauvegardés
+./mylab.sh --clean
+```
+
+### Windows
+
+```bat
+:: Installer le venv et les dépendances
+mylab.bat --install
+
+:: Lancer l'application
+mylab.bat
+
+:: Nettoyer les logs et groupes sauvegardés
+mylab.bat --clean
 ```
 
 Une fenêtre native s'ouvre. My Lab démarre SDM automatiquement s'il n'est pas déjà actif.
@@ -89,6 +116,8 @@ Une fenêtre native s'ouvre. My Lab démarre SDM automatiquement s'il n'est pas 
 ```
 projet/
 ├── my_lab.py            # application principale
+├── mylab.sh             # script macOS / Linux (install, run, clean)
+├── mylab.bat            # script Windows      (install, run, clean)
 ├── config.ini           # configuration chemins et ports
 ├── requirements.txt     # dépendances Python
 ├── groups/              # groupes d'adapters sauvegardés (*.group)
