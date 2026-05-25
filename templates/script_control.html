@@ -54,16 +54,31 @@
 </div>
 
 <!-- ── Run output panel ── -->
-<div id="scRunPanel" style="display:none; position:fixed; inset:0; background:rgba(22,27,29,0.35); z-index:200; align-items:flex-start; justify-content:center; padding-top:40px;">
-    <div class="sc-board-form" style="max-width:620px; width:95vw; max-height:80vh; display:flex; flex-direction:column;">
-        <div class="sc-board-form-header">
+<div id="scRunPanel" style="display:none; position:fixed; inset:0; background:rgba(22,27,29,0.35); z-index:200; align-items:flex-start; justify-content:center; padding-top:32px; padding-bottom:32px;">
+    <div id="scRunDialog">
+        <!-- header -->
+        <div class="sc-run-header">
             <span class="sc-panel-title" id="scRunTitle">Run</span>
             <div class="panel-spacer"></div>
-            <span id="scRunStatusBadge" style="font-size:11px; padding:2px 8px; border-radius:6px; background:#EFF2F9;"></span>
+            <span id="scRunStatusBadge" class="sc-run-badge"></span>
             <span class="group-close" onclick="closeRunPanel()">✕</span>
         </div>
-        <div id="scRunBoards" style="display:flex; flex-direction:column; gap:6px; padding:10px 16px; flex-shrink:0; border-bottom:1px solid rgba(22,27,29,0.08);"></div>
+        <!-- body: left (boards) + right (log) -->
+        <div class="sc-run-body">
+            <!-- left 1/3 : board mini-cards -->
+            <div class="sc-run-left">
+                <div class="sc-run-section-title">Boards</div>
+                <div id="scRunBoards" class="sc-run-boards-grid"></div>
+            </div>
+            <!-- right 2/3 : log output -->
+            <div class="sc-run-right">
+                <div class="sc-run-section-title">Output</div>
+                <div id="scRunLog" class="sc-run-log"></div>
+            </div>
+        </div>
+        <!-- footer -->
         <div class="sc-board-form-footer">
+            <button class="sc-browse-btn" id="scRunClearBtn" onclick="document.getElementById('scRunLog').innerHTML=''">Clear</button>
             <button class="sc-browse-btn" onclick="closeRunPanel()">Close</button>
         </div>
     </div>
@@ -374,7 +389,152 @@ pre.sc-yaml-content mark.sc-line-error {
 }
 
 
-/* ── board form popup ── */
+/* ── run panel dialog ─────────────────────────────── */
+#scRunDialog {
+    background: #EFF2F9;
+    border-radius: 16px;
+    width: 88vw;
+    max-width: 1100px;
+    max-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 6px 6px 24px rgba(22,27,29,0.28);
+}
+.sc-run-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(22,27,29,0.08);
+    flex-shrink: 0;
+}
+.sc-run-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #EAF3DE;
+    color: #3B6D11;
+}
+.sc-run-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 0;
+}
+/* left column — 1/3 */
+.sc-run-left {
+    width: 33.33%;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid rgba(22,27,29,0.08);
+    padding: 12px 12px;
+    gap: 10px;
+    min-height: 0;
+    overflow-y: auto;
+}
+/* right column — 2/3 */
+.sc-run-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px;
+    gap: 10px;
+    min-height: 0;
+}
+.sc-run-section-title {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #b5bfc6;
+    flex-shrink: 0;
+}
+/* board mini-cards grid: 2 per row */
+.sc-run-boards-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    align-content: start;
+}
+.sc-run-board-card {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 10px 10px;
+    border-radius: 10px;
+    background: #EFF2F9;
+    box-shadow:
+        -3px -3px 6px rgba(250,251,255,1),
+         3px  3px 6px rgba(22,27,29,0.20);
+    min-width: 0;
+}
+.sc-run-card-top {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.sc-run-card-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #b5bfc6;
+    transition: background .3s;
+}
+.sc-run-card-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #4a5a68;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sc-run-card-status {
+    font-size: 10px;
+    font-weight: 500;
+    flex-shrink: 0;
+}
+.sc-run-card-msg {
+    font-size: 10px;
+    color: #8899aa;
+    font-family: 'IBM Plex Mono', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-left: 14px;
+}
+/* log output */
+.sc-run-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    color: #4a5a68;
+    background: #EFF2F9;
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow:
+        inset -3px -3px 6px rgba(250,251,255,1),
+        inset  3px  3px 6px rgba(22,27,29,0.18);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.sc-run-log::-webkit-scrollbar { width: 5px; }
+.sc-run-log::-webkit-scrollbar-track { background: transparent; }
+.sc-run-log::-webkit-scrollbar-thumb { background: #b5bfc6; border-radius: 3px; }
+/* log line styles */
+.sc-log-source-global { color: #185FA5; font-weight: 500; }
+.sc-log-source-board  { color: #1D9E75; font-weight: 500; }
+.sc-log-source-error  { color: #E24B4A; font-weight: 500; }
+.sc-log-source-flash  { color: #EF9F27; font-weight: 500; }
+.sc-log-ts     { color: #b5bfc6; font-size: 10px; }
+.sc-log-indent { display: inline-block; width: 82px; }
+
+
 .sc-board-form {
     background: #EFF2F9;
     border-radius: 16px;
@@ -886,53 +1046,114 @@ async function onScRun() {
 }
 
 function openRunPanel(run_id) {
-    const panel = document.getElementById("scRunPanel");
-    if (!panel) return;
-    const log   = document.getElementById("scRunLog");
+    const panel  = document.getElementById("scRunPanel");
+    const log    = document.getElementById("scRunLog");
     const boards = document.getElementById("scRunBoards");
-    if (log)    log.innerHTML    = "";
-    if (boards) boards.innerHTML = "";
+    if (!panel) return;
+    log.innerHTML    = "";
+    boards.innerHTML = "";
 
+    // header
     const title = document.getElementById("scRunTitle");
     const badge = document.getElementById("scRunStatusBadge");
     if (title) title.innerText = `Run — ${activeScenario?.name || ""}`;
-    if (badge) {
-        badge.innerText = "running";
-        badge.style.background = "#EAF3DE";
-        badge.style.color = "#3B6D11";
-    }
+    if (badge) { badge.innerText = "running"; badge.className = "sc-run-badge"; }
     panel.style.display = "flex";
-    
+
+    // Track board index for display name fallback
+    const boardIndex = {};  // serial → display label
+
+    const STATUS_COLOR = {
+        pending:    "#b5bfc6",
+        erasing:    "#EF9F27",
+        flashing:   "#EF9F27",
+        connecting: "#7b9ec8",
+        ready:      "#7b9ec8",
+        running:    "#185FA5",
+        done:       "#1D9E75",
+        error:      "#E24B4A",
+    };
+
     const sc = getSocket();
 
-    // Listen for events
     sc.on("run_board_status", ({ serial, status, msg }) => {
         let card = document.getElementById(`run_board_${serial}`);
         if (!card) {
+            // First time we see this board — register index
+            const idx = Object.keys(boardIndex).length;
+            boardIndex[serial] = serial;  // will be overridden by nickname if available
             card = document.createElement("div");
             card.id = `run_board_${serial}`;
-            card.style.cssText = "display:flex; flex-direction:column; gap:4px; padding:10px 14px; border-radius:10px; background:#EFF2F9; box-shadow:-3px -3px 6px rgba(250,251,255,1),3px 3px 6px rgba(22,27,29,0.2);";
+            card.className = "sc-run-board-card";
+            card.innerHTML = `
+                <div class="sc-run-card-top">
+                    <span class="sc-run-card-dot" id="dot_${serial}"></span>
+                    <span class="sc-run-card-name" id="name_${serial}">${esc(serial)}</span>
+                    <span class="sc-run-card-status" id="st_${serial}"></span>
+                </div>
+                <div class="sc-run-card-msg" id="msg_${serial}"></div>`;
             boards.appendChild(card);
         }
-        const colors = {
-            pending: "#b5bfc6", flashing: "#EF9F27", connecting: "#EF9F27",
-            running: "#185FA5", done: "#1D9E75", error: "#E24B4A",
-        };
-        const color = colors[status] || "#b5bfc6";
-        card.innerHTML = `
-            <div style="display:flex; align-items:center; gap:10px;">
-                <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></span>
-                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#4a5a68;flex:1;">${serial}</span>
-                <span style="font-size:11px;color:${color};font-weight:500;">${status}</span>
-            </div>
-            ${msg ? `<div style="font-size:10px;color:#8899aa;padding-left:18px;">${esc(msg)}</div>` : ""}`;
+        const color = STATUS_COLOR[status] || "#b5bfc6";
+        const dot   = document.getElementById(`dot_${serial}`);
+        const st    = document.getElementById(`st_${serial}`);
+        const msgEl = document.getElementById(`msg_${serial}`);
+        if (dot)   dot.style.background = color;
+        if (st)    { st.innerText = status; st.style.color = color; }
+        if (msgEl) msgEl.innerText = msg || "";
+    });
+
+    sc.on("run_output", ({ serial, data, stream }) => {
+        const lines = data.split("\n").filter((l, i, a) => !(i === a.length - 1 && l === ""));
+        if (!lines.length) return;
+
+        if (stream === "flash") {
+            // flash → dernière ligne dans msg carte gauche uniquement
+            const lastLine = lines.filter(l => l.trim()).pop() || "";
+            const msgEl = document.getElementById(`msg_${serial}`);
+            if (msgEl && lastLine) msgEl.innerText = lastLine;
+            return;
+        }
+
+        // Tout le reste → log droit
+        let prefix, cls;
+        if (serial === "_scenario_") {
+            prefix = "[global]";
+            cls    = "sc-log-source-global";
+        } else {
+            const nameEl = document.getElementById(`name_${serial}`);
+            const name   = nameEl ? nameEl.innerText : serial;
+            prefix = `[board:${name}]`;
+            cls    = stream === "error" ? "sc-log-source-error" : "sc-log-source-board";
+        }
+
+        const ts   = new Date().toTimeString().slice(0,8);
+        const frag = document.createDocumentFragment();
+
+        lines.forEach((line, i) => {
+            const div = document.createElement("div");
+            if (i === 0) {
+                // First line: prefix + timestamp
+                div.innerHTML = `<span class="${cls}">${esc(prefix)}</span><span class="sc-log-ts"> ${ts}</span> ${esc(line)}`;
+            } else {
+                // Continuation lines: indented, no prefix repeat
+                div.innerHTML = `<span class="sc-log-indent"></span>${esc(line)}`;
+            }
+            frag.appendChild(div);
+        });
+        log.appendChild(frag);
+        log.scrollTop = log.scrollHeight;
+    });
+
+    sc.on("run_board_nickname", ({ serial, nickname }) => {
+        // Backend can emit this to update display name
+        const nameEl = document.getElementById(`name_${serial}`);
+        if (nameEl) nameEl.innerText = nickname;
     });
 
     sc.on("run_done", ({ run_id: rid }) => {
         if (rid !== run_id) return;
-        document.getElementById("scRunStatusBadge").innerText = "done";
-        document.getElementById("scRunStatusBadge").style.background = "#EAF3DE";
-        document.getElementById("scRunStatusBadge").style.color = "#1D9E75";
+        if (badge) { badge.innerText = "done"; }
     });
 }
 
@@ -941,6 +1162,7 @@ function closeRunPanel() {
     const sc = getSocket();
     sc.off("run_board_status");
     sc.off("run_output");
+    sc.off("run_board_nickname");
     sc.off("run_done");
 }
 

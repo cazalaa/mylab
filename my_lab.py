@@ -715,29 +715,26 @@ def scenario_check():
             except Exception as e:
                 issue("board", f"board search failed: {e}")
 
-        # ── jlink_name_or_ip (optional) ────────────────
-        jlink = str(board.get("jlink_name_or_ip", "")).strip()
-        if jlink.lower() == "none":
-            jlink = ""
+        # ── connection (optional, replaces jlink_name_or_ip) ──
+        # Accepts both old key (jlink_name_or_ip) and new key (connection)
+        connection = str(board.get("connection", board.get("jlink_name_or_ip", "usb"))).strip()
+        if connection.lower() in ("none", ""):
+            connection = "usb"
         matched_adapter = None
 
-        if jlink:
-            # Validate syntax
-            if not is_valid_ip(jlink) and not is_valid_serial(jlink):
-                issue("jlink_name_or_ip",
-                      f"'{jlink}' is not a valid IP address (x.x.x.x) or Silabs serial number (9 digits)")
+        if connection != "usb":
+            if not is_valid_ip(connection) and not is_valid_serial(connection):
+                issue("connection",
+                      f"'{connection}' must be a valid IP address (x.x.x.x), "
+                      f"a Silabs serial number (9 digits), or 'usb'")
             else:
-                # Find matching adapter
-                matched_adapter = adapter_by_host.get(jlink) or adapter_by_serial.get(jlink)
-
+                matched_adapter = adapter_by_host.get(connection) or adapter_by_serial.get(connection)
                 if not matched_adapter:
-                    issue("jlink_name_or_ip",
-                          f"'{jlink}' not found in available adapters")
+                    issue("connection",
+                          f"'{connection}' not found in available adapters")
                 elif board_id:
-                    # Check if board matches
-                    yaml_board_norm     = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE)
-
-                    adapter_boards = matched_adapter.get("boards", [])
+                    yaml_board_norm = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE)
+                    adapter_boards  = matched_adapter.get("boards", [])
                     adapter_board_ids = set()
                     for ab in adapter_boards:
                         for field in ["id", "shortLabel", "label", "pn"]:
@@ -745,18 +742,17 @@ def scenario_check():
                             if val:
                                 normalized = re.sub(r'^BRD', '', val.split()[0], flags=re.IGNORECASE).upper()
                                 adapter_board_ids.add(normalized)
-
                     if yaml_board_norm not in adapter_board_ids:
-                        nickname = matched_adapter.get("nickname") or matched_adapter.get("serialNumber", "")
-                        best_id  = adapter_boards[0].get("shortLabel", adapter_boards[0].get("id", "?")) if adapter_boards else "?"
+                        nick      = matched_adapter.get("nickname") or matched_adapter.get("serialNumber", "")
+                        best_id   = adapter_boards[0].get("shortLabel", adapter_boards[0].get("id", "?")) if adapter_boards else "?"
                         best_short = re.sub(r'^BRD', '', best_id, flags=re.IGNORECASE)
                         issue("board",
-                              f"adapter '{jlink}' ({nickname}) has board '{best_short}' "
+                              f"adapter '{connection}' ({nick}) has board '{best_short}' "
                               f"but scenario specifies '{yaml_board_norm}'. "
                               f"Consider changing board to '{best_short}'")
-        # If board_id set but no jlink — check if an available adapter has that board
-# If board_id set but no jlink — check if an available adapter has that board
-        if board_id and not jlink:
+
+        # If board_id set but connection=usb — check if an available adapter has that board
+        if board_id and connection == "usb":
             yaml_board_norm = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE).upper()
             matching = []
             for a in adapters_data:
@@ -775,19 +771,15 @@ def scenario_check():
                     + (f" ({a.get('nickname')})" if a.get('nickname') else "")
                     for a in matching
                 )
-                warn("jlink_name_or_ip",
-                     f"no jlink/IP set — board '{yaml_board_norm}' found on: {suggestions}. "
+                warn("connection",
+                     f"connection=usb — board '{yaml_board_norm}' found on: {suggestions}. "
                      f"Run will pick one randomly")
             else:
-                # No exact match — suggest any available adapter
                 if adapters_data:
-                    any_adapter = adapters_data[0]
-                    any_id = any_adapter.get("host") or any_adapter.get("serialNumber", "?")
-                    any_nick = f" ({any_adapter.get('nickname')})" if any_adapter.get("nickname") else ""
-                    warn("jlink_name_or_ip",
-                        f"no jlink/IP set and no adapter with board '{yaml_board_norm}' found")
+                    warn("connection",
+                         f"connection=usb and no adapter with board '{yaml_board_norm}' found")
                 else:
-                    info("jlink_name_or_ip",
+                    info("connection",
                          f"no adapters available — connect a board with '{yaml_board_norm}'")
         # ── booleans (optional, with defaults) ────────
         for field, default in [("masserase", True), ("halt_reset", False), ("open_terminal", False)]:
@@ -816,6 +808,24 @@ def scenario_check():
             script_path = os.path.join(scenario_dir, script)
             if not os.path.isfile(script_path):
                 issue("script", f"script '{script}' not found in scenario directory")
+
+    # ── nickname uniqueness ───────────────────────────────────
+    yaml_nicks = [str(b.get("nickname", "")).strip() for b in boards if b.get("nickname")]
+    if len(yaml_nicks) != len(set(yaml_nicks)):
+        issues.append({"line": find_line("nickname"), "msg": "Duplicate nicknames in scenario", "level": "error"})
+
+    # ── global script (optional) ──────────────────────────────
+    global_script = str(scenario.get("script", "")).strip()
+    if global_script:
+        gsp = os.path.join(scenario_dir, global_script)
+        if not os.path.isfile(gsp):
+            issues.append({"line": find_line("script:"), "msg": f"Global script '{global_script}' not found", "level": "error"})
+        else:
+            try:
+                with open(gsp) as f:
+                    compile(f.read(), gsp, "exec")
+            except SyntaxError as e:
+                issues.append({"line": find_line("script:"), "msg": f"Global script syntax error: {e}", "level": "error"})
 
     errors_only = [i for i in issues if i.get("level") == "error"]
     return jsonify({
@@ -853,6 +863,248 @@ def scenario_copy_file():
     
 
 
+
+# ============================================================
+# Scenario orchestration class
+# ============================================================
+
+class Scenario:
+    """
+    Injected as `scenario` in the global script.
+    Orchestrates all boards : reset, per-board script execution,
+    direct board access and checkpoint-based synchronisation.
+    """
+
+    def __init__(self, boards, board_cfgs, scenario_dir, run_id):
+        self._boards      = boards          # list[Board] in YAML order
+        self._board_cfgs  = board_cfgs      # list[dict] — raw YAML board entries
+        self._scenario_dir = scenario_dir
+        self._run_id      = run_id
+        self._run_room    = f"run_{run_id}"
+
+        # Checkpoint synchronisation
+        # name -> {serials_expected: set, events: {serial: Event}}
+        self._checkpoints = {}
+        self._cp_lock     = threading.Lock()
+
+        # Board-script futures (populated by run_board_scripts)
+        self._board_futures = []
+        self._board_executor = None
+
+        # Wire back-reference so board.checkpoint() can call us
+        for b in self._boards:
+            b._scenario_ctx = self
+
+    # ── board access ─────────────────────────────────────────
+    @property
+    def boards(self):
+        return list(self._boards)
+
+    def board(self, identifier):
+        """
+        Access a board by:
+          - int   → index in YAML order (0-based)
+          - str   → serial number, scenario nickname, or SDM nickname
+        Raises ValueError with a helpful message if not found.
+        """
+        if isinstance(identifier, int):
+            if 0 <= identifier < len(self._boards):
+                return self._boards[identifier]
+            raise ValueError(
+                f"scenario.board({identifier}): index out of range "
+                f"(scenario has {len(self._boards)} boards, 0-{len(self._boards)-1})"
+            )
+        s = str(identifier).strip()
+        for b in self._boards:
+            if b.serial == s or b.nickname == s:
+                return b
+        raise ValueError(
+            f"scenario.board({identifier!r}): no board with serial or nickname '{s}'. "
+            f"Available: {[b.nickname or b.serial for b in self._boards]}"
+        )
+
+    # ── lifecycle ─────────────────────────────────────────────
+    def release_reset(self):
+        """Send reset to all boards simultaneously (parallel)."""
+        self.print("[scenario] release_reset — resetting all boards in parallel")
+        with ThreadPoolExecutor(max_workers=len(self._boards)) as ex:
+            futures = {ex.submit(b.admin, "reset"): b for b in self._boards}
+            for fut in as_completed(futures):
+                b = futures[fut]
+                try:
+                    fut.result()
+                    self.print(f"[scenario] reset done: {b.nickname or b.serial}")
+                except Exception as e:
+                    self.print(f"[scenario] reset error on {b.nickname or b.serial}: {e}")
+
+    def run_board_scripts(self, wait=True):
+        """
+        Execute each board's per-board script in parallel.
+        wait=True  (default) — blocks until all scripts finish.
+        wait=False           — returns immediately; call wait_board_scripts() later.
+        """
+        self._board_executor = ThreadPoolExecutor(max_workers=len(self._boards))
+        self._board_futures = []
+        for b, cfg in zip(self._boards, self._board_cfgs):
+            script_file = cfg.get("script", "")
+            if not script_file:
+                continue
+            script_path = os.path.join(self._scenario_dir, script_file)
+            if not os.path.isfile(script_path):
+                self.print(f"[scenario] WARNING: script not found for {b.nickname or b.serial}: {script_file}")
+                continue
+            with open(script_path) as f:
+                code = f.read()
+            self._board_futures.append(
+                self._board_executor.submit(_exec_board_script, b, code, self._run_id)
+            )
+        if wait:
+            self.wait_board_scripts()
+
+    def wait_board_scripts(self):
+        """Block until all per-board scripts have finished."""
+        for fut in as_completed(self._board_futures):
+            try:
+                fut.result()
+            except Exception as e:
+                self.print(f"[scenario] board script exception: {e}")
+        if self._board_executor:
+            self._board_executor.shutdown(wait=False)
+
+    # ── checkpoint synchronisation ────────────────────────────
+    def _board_checkpoint(self, board, name):
+        """Called by board.checkpoint(name) from a per-board script thread."""
+        serial = board.serial
+        with self._cp_lock:
+            if name not in self._checkpoints:
+                # Auto-create with all boards as expected
+                self._checkpoints[name] = {
+                    "expected": {b.serial for b in self._boards},
+                    "arrived":  set(),
+                    "events":   {},
+                    "global_event": threading.Event(),
+                }
+            cp = self._checkpoints[name]
+            cp["arrived"].add(serial)
+            self.print(f"[checkpoint:{name}] {board.nickname or serial} arrived "
+                       f"({len(cp['arrived'])}/{len(cp['expected'])})")
+            # Notify any per-serial waiters
+            if serial in cp["events"]:
+                cp["events"][serial].set()
+            # If all expected boards arrived — fire the global event
+            if cp["expected"].issubset(cp["arrived"]):
+                cp["global_event"].set()
+
+    def wait_checkpoint(self, name, serials=None, timeout=30.0):
+        """
+        Block until the named checkpoint has been reached.
+        serials=None  → wait for ALL boards.
+        serials=[...]  → wait only for the listed serials/nicknames.
+        Returns True if checkpoint reached, False if timeout.
+        """
+        # Resolve serials list
+        if serials is None:
+            expected = {b.serial for b in self._boards}
+        else:
+            expected = set()
+            for ident in serials:
+                try:
+                    expected.add(self.board(ident).serial)
+                except ValueError as e:
+                    self.print(f"[scenario] wait_checkpoint warning: {e}")
+
+        with self._cp_lock:
+            if name not in self._checkpoints:
+                self._checkpoints[name] = {
+                    "expected": expected,
+                    "arrived":  set(),
+                    "events":   {},
+                    "global_event": threading.Event(),
+                }
+            cp = self._checkpoints[name]
+            # Override expected set with the caller's intent
+            cp["expected"] = expected
+            # Already there?
+            if expected.issubset(cp["arrived"]):
+                return True
+            evt = cp["global_event"]
+
+        self.print(f"[scenario] waiting checkpoint '{name}' "
+                   f"(expecting: {[self._nick(s) for s in expected]})...")
+        reached = evt.wait(timeout=timeout)
+        if not reached:
+            with self._cp_lock:
+                cp = self._checkpoints.get(name, {})
+                missing = expected - cp.get("arrived", set())
+            self.print(f"[scenario] TIMEOUT waiting checkpoint '{name}' — "
+                       f"missing: {[self._nick(s) for s in missing]}")
+        return reached
+
+    def _nick(self, serial):
+        for b in self._boards:
+            if b.serial == serial:
+                return b.nickname or serial
+        return serial
+
+    # ── convenience ──────────────────────────────────────────
+    def cli_all(self, cmd, timeout=10.0):
+        """Send same CLI command to all boards in parallel, return {serial: response}."""
+        results = {}
+        with ThreadPoolExecutor(max_workers=len(self._boards)) as ex:
+            futures = {ex.submit(b.cli, cmd, timeout): b for b in self._boards}
+            for fut in as_completed(futures):
+                b = futures[fut]
+                try:
+                    results[b.nickname or b.serial] = fut.result()
+                except Exception as e:
+                    results[b.nickname or b.serial] = f"ERROR: {e}"
+        return results
+
+    def delay(self, seconds):
+        self.print(f"[scenario] delay {seconds}s")
+        time.sleep(seconds)
+
+    def print(self, msg):
+        run_room = self._run_room
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        socketio.emit("run_output",
+                      {"serial": "_scenario_", "data": f"[{ts}] {msg}\n", "stream": "script"},
+                      room=run_room)
+        print(f"[SCENARIO] {msg}")
+
+
+def _exec_board_script(board, script_code, run_id):
+    """Execute a per-board script. Called from thread pool."""
+    run_room = f"run_{run_id}"
+    serial   = board.serial
+
+    def emit_status(status, msg=""):
+        active_runs[run_id]["boards"][serial] = status
+        socketio.emit("run_board_status",
+                      {"serial": serial, "status": status, "msg": msg},
+                      room=run_room)
+
+    emit_status("running")
+    try:
+        namespace = {
+            "board": board,
+            "time":  time,
+            "__builtins__": __builtins__,
+        }
+        exec(script_code, namespace)
+        if "script" in namespace and callable(namespace["script"]):
+            namespace["script"](board)
+        emit_status("done")
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        socketio.emit("run_output",
+                      {"serial": serial, "data": tb, "stream": "error"},
+                      room=run_room)
+        emit_status("error", str(e))
+        raise
+
+
 # ============================================================
 # Board class + Run pipeline
 # ============================================================
@@ -869,8 +1121,9 @@ class Board:
     """
 
     def __init__(self, serial, host, vcom_port, admin_port,
-                 run_id, scenario_dir, open_terminal=False):
+                 run_id, scenario_dir, open_terminal=False, nickname=None):
         self.serial        = serial
+        self.nickname      = nickname  # scenario nickname (overrides SDM nickname)
         self.host          = host
         self.vcom_port     = vcom_port
         self.admin_port    = admin_port
@@ -894,6 +1147,7 @@ class Board:
         self._admin_listeners = []
         self._vcom_expecting_echo = [False]  # ← default, always valid
         self._log_path = None
+        self._scenario_ctx = None  # set by Scenario when global script is used
 
     # ── configuration ────────────────────────────────────────
     def config_vcom(self, line_ending="CRLF", echo=True, prompt=">"):
@@ -947,8 +1201,19 @@ class Board:
             threading.Thread(target=_open, daemon=True).start()
 
     def _start_reader(self, sock, room):
-        is_vcom = room.endswith("_vcom")
-        stream  = "vcom" if is_vcom else "admin"
+        is_vcom  = room.endswith("_vcom")
+        stream   = "vcom" if is_vcom else "admin"
+        buf      = []   # accumulates chunks until prompt found
+
+        def flush(board):
+            if not buf:
+                return
+            text = "".join(buf)
+            buf.clear()
+            run_room = f"run_{board.run_id}"
+            socketio.emit("run_output",
+                          {"serial": board.serial, "data": text, "stream": stream},
+                          room=run_room)
 
         def reader():
             while True:
@@ -959,9 +1224,6 @@ class Board:
                     text = chunk.decode("utf-8", errors="replace")
                     socketio.emit("terminal_output",
                                   {"data": text, "room": room}, room=room)
-                    # Always look up the *current* Board for this room so that
-                    # a second run (new Board instance, reused socket) gets its
-                    # listeners dispatched correctly.
                     board = active_boards.get(room)
                     if board:
                         if board._log_path:
@@ -969,12 +1231,22 @@ class Board:
                             with open(board._log_path, "a") as f:
                                 for line in text.splitlines():
                                     f.write(f"[{ts}][{stream}] {line}\n")
+                        buf.append(text)
+                        # Flush when prompt detected (end of a response)
+                        prompt = board._vcom_prompt if is_vcom else board._admin_prompt
+                        combined = "".join(buf)
+                        if prompt in combined:
+                            flush(board)
                         listeners = board._vcom_listeners if is_vcom else board._admin_listeners
                         for listener in list(listeners):
                             try: listener(text)
                             except: pass
                 except Exception:
                     break
+            # Flush any remaining data on disconnect
+            board = active_boards.get(room)
+            if board and buf:
+                flush(board)
             active_telnets.pop(room, None)
             active_boards.pop(room, None)
 
@@ -1129,6 +1401,11 @@ class Board:
         self.print(f"[delay {seconds}s]")
         time.sleep(seconds)
 
+    def checkpoint(self, name):
+        """Signal to the global scenario script that this board has reached a named point."""
+        if self._scenario_ctx:
+            self._scenario_ctx._board_checkpoint(self, name)
+
     def print(self, msg):
         run_room = f"run_{self.run_id}"
         socketio.emit("run_output",
@@ -1150,12 +1427,32 @@ def get_log_file(serial):
     n = len(existing) + 1
     return os.path.join(LOG_DIR, f"{serial}_{dt}_{n:03d}.log")
 
-def _flash_board(board_cfg, scenario_dir):
-    serial  = board_cfg.get("_resolved_serial", "")
-    jlink   = str(board_cfg.get("jlink_name_or_ip", "")).strip()
-    print(f"[RUN] _flash_board serial={serial} jlink={jlink}")
-    is_ip   = "." in jlink
-    log     = []
+def _flash_board(board_cfg, scenario_dir, run_id=None):
+    serial     = board_cfg.get("_resolved_serial", "")
+    connection = str(board_cfg.get("connection", board_cfg.get("jlink_name_or_ip", "usb"))).strip()
+    if connection.lower() in ("usb", "none", ""):
+        connection = "usb"
+    print(f"[RUN] _flash_board serial={serial} connection={connection}")
+
+    # Build commander connection flag
+    parts = connection.split(".")
+    is_ip = len(parts) == 4 and all(p.isdigit() for p in parts)
+    if connection == "usb":
+        conn_flag = ["-s", serial]
+    elif is_ip:
+        conn_flag = ["--ip", connection]
+    else:
+        conn_flag = ["-s", connection]
+
+    log = []
+
+    def emit_status(status, msg=""):
+        if run_id:
+            run_room = f"run_{run_id}"
+            active_runs[run_id]["boards"][serial] = status
+            socketio.emit("run_board_status",
+                          {"serial": serial, "status": status, "msg": msg},
+                          room=run_room)
 
     def run_cmd(cmd):
         print(f"[RUN] running: {' '.join(cmd)}")
@@ -1168,24 +1465,20 @@ def _flash_board(board_cfg, scenario_dir):
                 return False
             return True
         except subprocess.TimeoutExpired:
-            print(f"[RUN] TIMEOUT running: {' '.join(cmd)}")
             log.append(f"ERROR: timeout after 60s")
             return False
         except Exception as e:
-            print(f"[RUN] EXCEPTION: {e}")
             log.append(f"ERROR: {e}")
             return False
 
-    conn_flag = ["--ip", jlink] if is_ip else ["-s", jlink]
-
     if board_cfg.get("masserase", True):
-        print(f"[RUN] starting masserase")
+        emit_status("erasing")
         if not run_cmd([COMMANDER_PATH, "device", "masserase"] + conn_flag):
             return False, log
 
     for s37 in board_cfg.get("s37_files", []):
         s37_path = os.path.join(scenario_dir, s37)
-        print(f"[RUN] flashing {s37_path}")
+        emit_status("flashing", os.path.basename(s37_path))
         cmd = [COMMANDER_PATH, "flash", s37_path] + conn_flag
         if board_cfg.get("halt_reset", False):
             cmd += ["--halt"]
@@ -1197,11 +1490,18 @@ def _flash_board(board_cfg, scenario_dir):
 
 
 def _run_board(board_cfg, scenario_dir, run_id, script_code):
-    serial = board_cfg.get("_resolved_serial", "unknown")
-    print(f"[RUN] _run_board started serial={serial}")
+    serial   = board_cfg.get("_resolved_serial", "unknown")
+    nickname = board_cfg.get("_nickname") or None
+    print(f"[RUN] _run_board started serial={serial} nickname={nickname}")
     run_room = f"run_{run_id}"
     log_path = get_log_file(serial)
     time.sleep(2.0)
+
+    # Send nickname to UI so log prefix and card name show it
+    if nickname:
+        socketio.emit("run_board_nickname",
+                      {"serial": serial, "nickname": nickname},
+                      room=run_room)
 
     def emit_status(status, msg=""):
         active_runs[run_id]["boards"][serial] = status
@@ -1226,7 +1526,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         f.write(f"# Started: {datetime.datetime.now().isoformat()}\n")
         f.write(f"# {'='*60}\n\n")
     # Flash
-    ok, flash_log = _flash_board(board_cfg, scenario_dir)
+    ok, flash_log = _flash_board(board_cfg, scenario_dir, run_id)
     for line in flash_log:
         log("flash", line)
         socketio.emit("run_output",
@@ -1263,13 +1563,14 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
 
     # Create Board instance and connect
     board = Board(
-        serial       = serial,
-        host         = host,
-        vcom_port    = vcom_port,
-        admin_port   = admin_port,
-        run_id       = run_id,
-        scenario_dir = scenario_dir,
-        open_terminal = board_cfg.get("open_terminal", False)
+        serial        = serial,
+        host          = host,
+        vcom_port     = vcom_port,
+        admin_port    = admin_port,
+        run_id        = run_id,
+        scenario_dir  = scenario_dir,
+        open_terminal = board_cfg.get("open_terminal", False),
+        nickname      = board_cfg.get("_nickname"),
     )
     board._log_path = log_path
     try:
@@ -1283,29 +1584,15 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         return
 
     # Run script
-    print(f"[RUN] board.connect() done for {serial}, starting script")
     emit_status("running")
-    print(f"[RUN] executing script for {serial}")
-    try:
-        namespace = {
-            "board": board,
-            "time": time,
-            "__builtins__": __builtins__,
-        }
-        exec(script_code, namespace)
-        print(f"[RUN] script exec done, calling script(board)")
-        if "script" in namespace and callable(namespace["script"]):
-            namespace["script"](board)
-        print(f"[RUN] script(board) returned")
+    if script_code:
+        try:
+            _exec_board_script(board, script_code, run_id)
+            emit_status("done")
+        except Exception as e:
+            emit_status("error", str(e))
+    else:
         emit_status("done")
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        print(f"[RUN] script exception: {tb}")
-        socketio.emit("run_output",
-                      {"serial": serial, "data": tb, "stream": "error"},
-                      room=run_room)
-        emit_status("error", str(e))
 
 
 @app.route("/api/scenario-run", methods=["POST"])
@@ -1320,19 +1607,18 @@ def scenario_run():
 
     scenario_dir = os.path.dirname(full)
 
-    # Parse scenario
     with open(full) as f:
         content = f.read()
     try:
-        scenario = yaml.safe_load(content)
+        scenario_yaml = yaml.safe_load(content)
     except yaml.YAMLError as e:
         return jsonify({"ok": False, "error": f"YAML error: {e}"}), 400
 
-    boards = scenario.get("boards", [])
-    if not boards:
+    boards_cfg = scenario_yaml.get("boards", [])
+    if not boards_cfg:
         return jsonify({"ok": False, "error": "No boards defined"}), 400
 
-    # Resolve adapter serial numbers from jlink/IP
+    # Fetch available adapters from SDM
     try:
         adapters_data = requests.get(f"{SDM_BASE}/api/adapters", timeout=3).json()
         if isinstance(adapters_data, dict):
@@ -1342,14 +1628,17 @@ def scenario_run():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Cannot reach SDM: {e}"}), 500
 
-    # Resolve serials and load scripts
+    # Resolve each board entry
     resolved_boards = []
-    for b in boards:
-        jlink = str(b.get("jlink_name_or_ip", "")).strip()
-        if jlink and jlink.lower() != "none":
-            adapter = adapter_by_host.get(jlink) or adapter_by_serial.get(jlink)
+    for b in boards_cfg:
+        # connection: usb (default) or IP address
+        connection = str(b.get("connection", b.get("jlink_name_or_ip", "usb"))).strip()
+        if connection.lower() in ("usb", "none", ""):
+            connection = "usb"
+
+        if connection != "usb":
+            adapter = adapter_by_host.get(connection) or adapter_by_serial.get(connection)
         else:
-            # Pick any matching board from available
             board_id = str(b.get("board", "")).strip()
             adapter = None
             for a in adapters_data:
@@ -1364,42 +1653,167 @@ def scenario_run():
                     break
 
         if not adapter:
-            return jsonify({"ok": False, "error": f"No adapter found for board {b.get('board', '?')}"}), 400
+            return jsonify({"ok": False, "error": f"No adapter found for board entry {b.get('board', '?')}"}), 400
 
         bc = dict(b)
         bc["_resolved_serial"] = adapter.get("serialNumber")
+        bc["connection"]       = connection
+
+        # Nickname resolution: YAML > SDM > None
+        yaml_nick = str(b.get("nickname", "")).strip() or None
+        sdm_nick  = adapter.get("nickname") or None
+        bc["_nickname"] = yaml_nick or sdm_nick
+
         resolved_boards.append(bc)
 
-    # Load script file
-    script_file = boards[0].get("script", "")  # use first board's script for now
-    script_code = ""
-    if script_file:
-        script_path = os.path.join(scenario_dir, script_file)
-        if os.path.isfile(script_path):
-            with open(script_path) as f:
-                script_code = f.read()
+    # Check nickname uniqueness
+    nicks = [bc["_nickname"] for bc in resolved_boards if bc["_nickname"]]
+    if len(nicks) != len(set(nicks)):
+        return jsonify({"ok": False, "error": "Duplicate nicknames in scenario"}), 400
+
+    # Global script (optional)
+    global_script_file = scenario_yaml.get("script", "")
+    global_script_code = None
+    if global_script_file:
+        gsp = os.path.join(scenario_dir, global_script_file)
+        if os.path.isfile(gsp):
+            with open(gsp) as f:
+                global_script_code = f.read()
+
+    # Per-board script codes (optional per board)
+    for bc in resolved_boards:
+        sf = bc.get("script", "")
+        bc["_script_code"] = ""
+        if sf:
+            sp = os.path.join(scenario_dir, sf)
+            if os.path.isfile(sp):
+                with open(sp) as f:
+                    bc["_script_code"] = f.read()
+
     # Create run
     run_id = str(uuid.uuid4())[:8]
     active_runs[run_id] = {
-        "status": "running",
+        "status":   "running",
         "scenario": path,
-        "boards": {b["_resolved_serial"]: "pending" for b in resolved_boards}
+        "boards":   {bc["_resolved_serial"]: "pending" for bc in resolved_boards}
     }
 
-    # Start parallel threads
     def run_all():
-        with ThreadPoolExecutor(max_workers=len(resolved_boards)) as executor:
-            futures = [
-                executor.submit(_run_board, bc, scenario_dir, run_id, script_code)
-                for bc in resolved_boards
-            ]
-            for f in as_completed(futures):
-                pass
+        if global_script_code:
+            # ── Mode with global script ───────────────────────────
+            # Emit flashing status immediately so cards appear on UI
+            run_room = f"run_{run_id}"
+            for bc in resolved_boards:
+                serial   = bc["_resolved_serial"]
+                nickname = bc.get("_nickname")
+                if nickname:
+                    socketio.emit("run_board_nickname",
+                                  {"serial": serial, "nickname": nickname},
+                                  room=run_room)
+                active_runs[run_id]["boards"][serial] = "flashing"
+                socketio.emit("run_board_status",
+                              {"serial": serial, "status": "flashing"},
+                              room=run_room)
+
+            # Flash all boards in parallel
+            with ThreadPoolExecutor(max_workers=len(resolved_boards)) as ex:
+                flash_futures = {ex.submit(_flash_board, bc, scenario_dir, run_id): bc
+                                 for bc in resolved_boards}
+                for fut in as_completed(flash_futures):
+                    bc = flash_futures[fut]
+                    serial = bc["_resolved_serial"]
+                    try:
+                        ok, flash_log = fut.result()
+                    except Exception as e:
+                        ok, flash_log = False, [str(e)]
+                    if not ok:
+                        active_runs[run_id]["boards"][serial] = "error"
+                        socketio.emit("run_board_status",
+                                      {"serial": serial, "status": "error", "msg": "Flash failed"},
+                                      room=run_room)
+
+            # Abort if any flash failed
+            if any(v == "error" for v in active_runs[run_id]["boards"].values()):
+                active_runs[run_id]["status"] = "done"
+                socketio.emit("run_done", {"run_id": run_id}, room=f"run_{run_id}")
+                return
+
+            # Connect all boards
+            board_objs = []
+            for bc in resolved_boards:
+                serial   = bc["_resolved_serial"]
+                run_room = f"run_{run_id}"
+                active_runs[run_id]["boards"][serial] = "connecting"
+                socketio.emit("run_board_status",
+                              {"serial": serial, "status": "connecting"},
+                              room=run_room)
+                try:
+                    r       = requests.get(f"{SDM_BASE}/api/adapter/{serial}/get-info", timeout=3)
+                    info    = r.json()
+                    adapter = info.get("adapter", {})
+                    conns   = info.get("connections", [])
+                    ports   = {c["portName"]: c["portNumber"] for c in conns}
+                    connectivity = adapter.get("connectivityType", "usb")
+                    host    = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
+                    vcom_port  = ports.get("serial1")
+                    admin_port = ports.get("admin")
+                    if not vcom_port or not admin_port:
+                        raise RuntimeError("Could not get ports from SDM")
+                    board_obj = Board(
+                        serial        = serial,
+                        host          = host,
+                        vcom_port     = vcom_port,
+                        admin_port    = admin_port,
+                        run_id        = run_id,
+                        scenario_dir  = scenario_dir,
+                        open_terminal = bc.get("open_terminal", False),
+                        nickname      = bc.get("_nickname"),
+                    )
+                    board_obj._log_path = get_log_file(serial)
+                    board_obj.connect()
+                    board_objs.append(board_obj)
+                    active_runs[run_id]["boards"][serial] = "ready"
+                    socketio.emit("run_board_status",
+                                  {"serial": serial, "status": "ready"},
+                                  room=run_room)
+                except Exception as e:
+                    active_runs[run_id]["boards"][serial] = "error"
+                    socketio.emit("run_board_status",
+                                  {"serial": serial, "status": "error", "msg": str(e)},
+                                  room=run_room)
+
+            # Run global script
+            scenario_obj = Scenario(board_objs, resolved_boards, scenario_dir, run_id)
+            run_room = f"run_{run_id}"
+            try:
+                namespace = {
+                    "scenario": scenario_obj,
+                    "time":     time,
+                    "__builtins__": __builtins__,
+                }
+                exec(global_script_code, namespace)
+                if "script" in namespace and callable(namespace["script"]):
+                    namespace["script"](scenario_obj)
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                socketio.emit("run_output",
+                              {"serial": "_scenario_", "data": tb, "stream": "error"},
+                              room=run_room)
+        else:
+            # ── Mode without global script (original behaviour) ───
+            with ThreadPoolExecutor(max_workers=len(resolved_boards)) as executor:
+                futures = [
+                    executor.submit(_run_board, bc, scenario_dir, run_id, bc["_script_code"])
+                    for bc in resolved_boards
+                ]
+                for f in as_completed(futures):
+                    pass
+
         active_runs[run_id]["status"] = "done"
         socketio.emit("run_done", {"run_id": run_id}, room=f"run_{run_id}")
 
     threading.Thread(target=run_all, daemon=True).start()
-
     return jsonify({"ok": True, "run_id": run_id})
 
 
