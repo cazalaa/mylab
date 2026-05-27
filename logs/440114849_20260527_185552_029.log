@@ -1,0 +1,53 @@
+[18:55:52.150][admin] WSTK> Toggling reset with 100 ms delay.
+[18:55:52.229][admin] WSTK> 
+[18:55:53.324][vcom] 
+[18:55:53.324][vcom] {{(reset)}{App:RAILtest}{Built:May 19 2026 21:48:48}{Cause:0x500}{Brd:BRD4162A}}
+[18:55:53.324][vcom] {{(radio)}{FreqHz:3840
+[18:55:53.326][vcom] 0000}{ModuleInfo:0xffffffff}}
+[18:55:53.326][vcom] {{(system)}{Family:EFR32XG12}{Fam#:36}{ChipRev:1.1}{sdid:84}{Part:0x031c014c}}
+[18:55:53.326][vcom] {{(pti)}{mode:2-wire-UART}{baud:1600000}{protocol:0}{radioConfig:0x00}}
+[18:55:53.326][vcom] > 
+[18:55:54.665][vcom] getchannel
+[18:55:54.665][vcom] 
+[18:55:54.665][vcom] {{(getchannel)}{cha
+[18:55:54.667][vcom] nnel:0}}
+[18:55:54.667][vcom] > 
+[18:55:54.678][vcom] tx 1
+[18:55:54.678][vcom] 
+[18:55:54.678][vcom] {{(tx)}{PacketTx:Enabled}
+[18:55:54.680][vcom] {None:Disable
+[18:55:54.684][vcom] d}{Time:1418361}}
+[18:55:54.684][vcom] > {{(appMode)
+[18:55:54.684][script] tx 1 response: {{(tx)}{PacketTx:Enabled}{None:Disabled}{Time:1418361}}
+[18:55:54.688][vcom] }{None:Enabled}{PacketTx:Disabled}{Time:1423579}}
+[18:55:54.688][vcom] {{(tx
+[18:55:54.693][admin] ------ BOARDID board list ------
+[18:55:54.693][vcom] End)}{txStatus:Complete}{t
+[18:55:54.695][vcom] ransmitted:1}{lastTxTime:1423506
+[18:55:54.697][vcom] }{timePos:6}{durationUs:201}{lastTxStart:1423305}{ccaSucc
+[18:55:54.704][vcom] ess:0}{failed:0}{lastTxStatus:0x000000000}{txRemain:0}{isA
+[18:55:54.708][vcom] ck:False}}
+[18:55:54.730][admin]   [A0h]  BRD4001A   Rev. A01
+[18:55:54.730][admin]   [A2h]  BRD4162A   Rev. A01
+[18:55:54.730][admin] WSTK> 
+[18:55:54.737][admin] PB0 is pressed
+[18:55:54.737][admin] WSTK> 
+[18:55:55.044][admin] PB0 is released
+[18:55:55.044][admin] WSTK> 
+[18:55:55.046][vcom] tx 10{{
+[18:55:55.048][vcom] (appMode)}{PacketTx:Enabled}{Non
+[18:55:55.052][vcom] e:Disabled}{Time:1786430}}
+[18:55:55.054][vcom] 
+[18:55:55.054][vcom] 
+[18:55:55.054][vcom] 
+[18:55:55.054][vcom] {{(appMode)}{None:Enabled}{
+[18:55:55.057][vcom] PacketTx:Disabled}{Time:1
+[18:55:55.059][vcom] 792118}}
+[18:55:55.059][vcom] {{(txEnd)}{txStatus:Co
+[18:55:55.062][vcom] mplete}{transmitted:1}{la
+[18:55:55.064][vcom] stTxTime:1792003}{timePos:6}{dur
+[18:55:55.066][vcom] ationUs:202}{lastTxStart:1
+[18:55:55.069][vcom] 791801}{ccaSuccess:0}{failed:0}{
+[18:55:55.072][vcom] lastTxStatus:0x000000000}{
+[18:55:55.077][vcom] txRemain:0}{isAck:False}}
+[18:55:55.077][vcom] > 

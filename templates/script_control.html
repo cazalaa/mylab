@@ -1108,10 +1108,14 @@ function openRunPanel(run_id) {
         if (!lines.length) return;
 
         if (stream === "flash") {
-            // flash → dernière ligne dans msg carte gauche uniquement
-            const lastLine = lines.filter(l => l.trim()).pop() || "";
+            // flash → carte gauche uniquement, sans filename
             const msgEl = document.getElementById(`msg_${serial}`);
-            if (msgEl && lastLine) msgEl.innerText = lastLine;
+            if (msgEl) msgEl.innerText = "";
+            return;
+        }
+
+        if (stream === "vcom" || stream === "admin") {
+            // Raw board exchanges → not shown in output log
             return;
         }
 
@@ -1127,16 +1131,12 @@ function openRunPanel(run_id) {
             cls    = stream === "error" ? "sc-log-source-error" : "sc-log-source-board";
         }
 
-        const ts   = new Date().toTimeString().slice(0,8);
         const frag = document.createDocumentFragment();
-
         lines.forEach((line, i) => {
             const div = document.createElement("div");
             if (i === 0) {
-                // First line: prefix + timestamp
-                div.innerHTML = `<span class="${cls}">${esc(prefix)}</span><span class="sc-log-ts"> ${ts}</span> ${esc(line)}`;
+                div.innerHTML = `<span class="${cls}">${esc(prefix)}</span> ${esc(line)}`;
             } else {
-                // Continuation lines: indented, no prefix repeat
                 div.innerHTML = `<span class="sc-log-indent"></span>${esc(line)}`;
             }
             frag.appendChild(div);

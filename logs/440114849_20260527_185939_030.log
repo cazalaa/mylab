@@ -1,0 +1,60 @@
+[18:59:39.556][admin] WSTK> Toggling reset with 100 ms delay.
+[18:59:39.655][admin] WSTK> 
+[18:59:40.688][vcom] 
+[18:59:40.688][vcom] {{(reset)}{App:RAILtest}{Built:May 19
+[18:59:40.690][vcom]  2026 21:48:48}{Cause:0x500}{Brd
+[18:59:40.694][vcom] :BRD4162A}}
+[18:59:40.694][vcom] {{(radio)}{Fr
+[18:59:40.696][vcom] eqHz:38400000}{ModuleInfo:0xffff
+[18:59:40.699][vcom] ffff}}
+[18:59:40.699][vcom] {{(system)}{Family
+[18:59:40.701][vcom] :EFR32XG12}{Fam#:36}{ChipRev:1.1
+[18:59:40.705][vcom] }{sdid:84}{Part:0x031c014
+[18:59:40.707][vcom] c}}
+[18:59:40.707][vcom] {{(pti)}{mode:2-wire-UART}{
+[18:59:40.710][vcom] baud:1600000}{protocol:0}{
+[18:59:40.713][vcom] radioConfig:0x00}}
+[18:59:40.713][vcom] > 
+[18:59:42.075][vcom] getchannel
+[18:59:42.075][vcom] 
+[18:59:42.080][vcom] {{(getchannel)}{channel:0}}
+[18:59:42.080][vcom] > 
+[18:59:42.095][vcom] tx 1
+[18:59:42.095][vcom] 
+[18:59:42.095][vcom] {{(tx)}{PacketTx:Enabled}{None:Dis
+[18:59:42.099][vcom] abled}{Time:1408497}}
+[18:59:42.099][vcom] > 
+[18:59:42.100][script] tx 1 response: {{(tx)}{PacketTx:Enabled}{None:Disabled}{Time:1408497}}
+[18:59:42.102][vcom] {{(appMode)}{None:Enabled}{Packe
+[18:59:42.105][vcom] tTx:Disabled}{Time:141371
+[18:59:42.107][vcom] 5}}
+[18:59:42.107][vcom] {{(txEnd)}{txStatus:Complet
+[18:59:42.108][admin] ------ BOARDID board list ------
+[18:59:42.111][vcom] e}{transmitted:1}{lastTxT
+[18:59:42.112][vcom] ime:1413641}{timePos:6}{duration
+[18:59:42.116][vcom] Us:201}{lastTxStart:141344
+[18:59:42.119][vcom] 0}{ccaSuccess:0}{failed:0}{lastT
+[18:59:42.120][vcom] xStatus:0x000000000}{txRe
+[18:59:42.124][vcom] main:0}{isAck:False}}
+[18:59:42.143][admin]   [A0h]  BRD4001A   Rev. A01
+[18:59:42.143][admin]   [A2h]  BRD4162A   Rev. A01
+[18:59:42.143][admin] WSTK> 
+[18:59:42.151][admin] PB0 is pressed
+[18:59:42.151][admin] WSTK> 
+[18:59:42.452][admin] PB0 is released
+[18:59:42.452][admin] WSTK> 
+[18:59:42.454][vcom] {{(appMode)
+[18:59:42.456][vcom] }{PacketTx:Enabled}{None:Disable
+[18:59:42.462][vcom] d}{Time:1767636}}
+[18:59:42.462][vcom] tx 10
+[18:59:42.462][vcom] 
+[18:59:42.462][vcom] {{(appMode)}{None:Enabled}{Pack
+[18:59:42.465][vcom] etTx:Disabled}{Time:177370
+[18:59:42.466][vcom] 3}}
+[18:59:42.466][vcom] {{(txEnd)}{txStatus:Complet
+[18:59:42.470][vcom] e}{transmitted:1}{lastTxTime:1773198}{timePos:6}{duration
+[18:59:42.474][vcom] Us:201}{lastTxStart:177299
+[18:59:42.476][vcom] 7}{ccaSuccess:0}{failed:0}{lastT
+[18:59:42.480][vcom] xStatus:0x000000000}{txRe
+[18:59:42.484][vcom] main:0}{isAck:False}}
+[18:59:42.484][vcom] > 

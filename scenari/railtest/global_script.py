@@ -20,6 +20,6 @@ def script(scenario):
     # Step 2 — Send tx 10 on board 0
     scenario.print("Sending tx 10 on board 0...")
     response = board0.cli("tx 10")
-    scenario.print(f"tx 10 response: {response.strip()}")
+    #scenario.print(f"tx 10 response: {response.strip()}")
 
     scenario.print("=== Global script complete ===")

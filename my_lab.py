@@ -1141,7 +1141,6 @@ def _exec_board_script(board, script_code, run_id):
                       room=run_room)
 
     emit_status("running")
-    log_ts("script started")
     try:
         namespace = {
             "board": board,
@@ -1151,7 +1150,6 @@ def _exec_board_script(board, script_code, run_id):
         exec(script_code, namespace)
         if "script" in namespace and callable(namespace["script"]):
             namespace["script"](board)
-        log_ts("script done")
         emit_status("done")
     except Exception as e:
         import traceback
@@ -1199,7 +1197,7 @@ class Board:
         self._vcom_prompt = ">"
         self._admin_le    = b"\r\n"
         self._admin_echo  = False
-        self._admin_prompt = "WSTK>"
+        self._admin_prompt = ">"
 
         self._vcom_listeners  = []
         self._admin_listeners = []
@@ -1213,7 +1211,7 @@ class Board:
         self._vcom_echo   = echo
         self._vcom_prompt = prompt
 
-    def config_admin(self, line_ending="CRLF", echo=False, prompt="WSTK>"):
+    def config_admin(self, line_ending="CRLF", echo=False, prompt=">"):
         self._admin_le     = LINE_ENDINGS.get(line_ending.upper(), b"\r\n")
         self._admin_echo   = echo
         self._admin_prompt = prompt
@@ -1290,15 +1288,17 @@ class Board:
                                 for line in text.splitlines():
                                     f.write(f"[{ts}][{stream}] {line}\n")
                         buf.append(text)
-                        # Flush when prompt detected (end of a response)
-                        prompt = board._vcom_prompt if is_vcom else board._admin_prompt
-                        combined = "".join(buf)
+                        prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
+                        combined  = "".join(buf)
+                        listeners = board._vcom_listeners if is_vcom else board._admin_listeners
+                        # Dispatch combined buffer to listeners so they always
+                        # see the full accumulated response including the prompt
+                        for listener in list(listeners):
+                            try: listener(combined)
+                            except: pass
+                        # Flush to run panel once prompt detected
                         if prompt in combined:
                             flush(board)
-                        listeners = board._vcom_listeners if is_vcom else board._admin_listeners
-                        for listener in list(listeners):
-                            try: listener(text)
-                            except: pass
                 except Exception:
                     break
             # Flush any remaining data on disconnect
@@ -1343,29 +1343,40 @@ class Board:
             return ""
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[CLI] {self.nickname or self.serial} {ts} >>> {cmd}")
-        payload = cmd.encode("utf-8") + self._vcom_le
 
-        if self._vcom_echo and hasattr(self, '_vcom_expecting_echo'):
-            self._vcom_expecting_echo[0] = True
-        self._vcom_sock.sendall(payload)
-
+        # Register listener BEFORE sending to avoid missing fast responses
         event    = threading.Event()
         response = []
         prompt   = self._vcom_prompt
 
-        def on_data(data):
-            response.append(data)
-            combined = "".join(response)
+        def on_data(combined):
             if prompt in combined:
+                response.append(combined)
                 event.set()
 
         self._vcom_listeners.append(on_data)
+
+        payload = cmd.encode("utf-8") + self._vcom_le
+        if self._vcom_echo and hasattr(self, '_vcom_expecting_echo'):
+            self._vcom_expecting_echo[0] = True
+        self._vcom_sock.sendall(payload)
+
         event.wait(timeout=timeout)
         self._vcom_listeners.remove(on_data)
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        timed_out = ">" not in "".join(response)
+        timed_out = not event.is_set()
         print(f"[CLI] {self.nickname or self.serial} {ts} <<< {'TIMEOUT' if timed_out else 'ok'}")
-        return "".join(response)
+        raw = "".join(response)
+        # Strip command echo (first line) and trailing prompt line
+        lines = raw.splitlines()
+        # Remove echo line (starts with the command)
+        if lines and cmd.strip() in lines[0]:
+            lines = lines[1:]
+        # Remove trailing prompt line
+        prompt = self._vcom_prompt
+        while lines and lines[-1].strip() in (prompt, ""):
+            lines.pop()
+        return "\n".join(lines)
 
     # ── ADMIN ────────────────────────────────────────────────
     def _send_admin_raw(self, cmd):
@@ -1401,23 +1412,25 @@ class Board:
         if not self._admin_sock:
             return ""
 
+        # Register listener BEFORE sending the command to avoid missing
+        # responses that arrive immediately (race condition on fast/USB boards)
+        event    = threading.Event()
+        response = []
+        prompt   = self._admin_prompt
+
+        def on_data(combined):
+            if prompt in combined:
+                response.append(combined)
+                event.set()
+
+        self._admin_listeners.append(on_data)
+
         self._admin_sock.sendall((raw + self._admin_le.decode()).encode("utf-8"))
         admin_room = f"{self.serial}_admin"
         socketio.emit("terminal_echo",
                       {"data": f"\\{raw}", "room": admin_room},
                       room=admin_room)
 
-        event    = threading.Event()
-        response = []
-        prompt   = self._admin_prompt
-
-        def on_data(data):
-            response.append(data)
-            combined = "".join(response)
-            if prompt in combined:
-                event.set()
-
-        self._admin_listeners.append(on_data)
         event.wait(timeout=timeout)
         self._admin_listeners.remove(on_data)
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -1467,7 +1480,6 @@ class Board:
     def delay(self, seconds):
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[DLY] {self.nickname or self.serial} {ts} {seconds}s")
-        self.print(f"[delay {seconds}s]")
         time.sleep(seconds)
 
     def checkpoint(self, name):
@@ -1547,7 +1559,7 @@ def _flash_board(board_cfg, scenario_dir, run_id=None):
 
     for s37 in board_cfg.get("s37_files", []):
         s37_path = os.path.join(scenario_dir, s37)
-        emit_status("flashing", os.path.basename(s37_path))
+        emit_status("flashing")
         cmd = [COMMANDER_PATH, "flash", s37_path] + conn_flag
         if board_cfg.get("halt_reset", False):
             cmd += ["--halt"]

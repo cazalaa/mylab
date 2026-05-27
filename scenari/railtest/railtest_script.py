@@ -18,7 +18,8 @@ def script(board):
     board.reset()
     board.delay(1.5)  # wait for board to fully boot
     board.cli("getchannel")
-    board.cli("tx 1")
+    response = board.cli("tx 1")
+    board.print(f"tx 1 response: {response.split(">")[0].strip()}")
     #board.cli("help")
     board.admin("boardid")
     board.button(0, 0.3)

@@ -1,0 +1,45 @@
+[18:49:08.579][admin] WSTK> Toggling reset with 100 ms delay.
+[18:49:08.679][admin] WSTK> 
+[18:49:09.774][vcom] 
+[18:49:09.774][vcom] {{(reset)}{App:RAILtest}{Built:May 19 2026 21:48:48}{Cause:0x500}{Brd:BRD4162A}}
+[18:49:09.774][vcom] {{(radio)}{FreqHz:3840000
+[18:49:09.777][vcom] 0}{ModuleInfo:0xffffffff}}
+[18:49:09.777][vcom] {{(system)}{Family:EFR32XG12}{Fam#:36}{ChipRev:1.1}{sdid:84}{Part:0x031c014c}}
+[18:49:09.777][vcom] {{(pti)}{mode:2-wire-UART}{baud:1600000}{protocol:0}{radioConfig:0x00}}
+[18:49:09.777][vcom] > 
+[18:49:11.107][vcom] getchannel
+[18:49:11.107][vcom] 
+[18:49:11.107][vcom] {{(getchannel)}{
+[18:49:11.111][vcom] channel:0}}
+[18:49:11.111][vcom] > 
+[18:49:11.128][vcom] tx 1
+[18:49:11.128][vcom] 
+[18:49:11.128][vcom] {{(tx)}{PacketTx:Enabled}{None:Disabled}{Time:1411732}}
+[18:49:11.128][vcom] > {{(appM
+[18:49:11.129][script] tx 1 response: {{(tx)}{PacketTx:Enabled}{None:Disabled}{Time:1411732}}
+> {{(appM
+[18:49:11.131][vcom] ode)}{None:Enabled}{PacketTx:Disabled}{Time:1416950}}
+[18:49:11.131][vcom] {
+[18:49:11.137][vcom] {(txEnd)}{txStatus:Complete}{transmitted:1}{lastTxTime:141
+[18:49:11.137][admin] ------ BOARDID board list ------
+[18:49:11.141][vcom] 6877}{timePos:6}{durationUs:201}{lastTxStart:1416676}{cca
+[18:49:11.146][vcom] Success:0}{failed:0}{lastTxStatus:0x000000000}{txRemain:0}
+[18:49:11.151][vcom] {isAck:False}}
+[18:49:11.177][admin]   [A0h]  BRD4001A   Rev. A01
+[18:49:11.177][admin]   [A2h]  BRD4162A   Rev. A01
+[18:49:11.177][admin] WSTK> 
+[18:49:11.189][admin] PB0 is pressed
+[18:49:11.189][admin] WSTK> 
+[18:49:11.492][admin] PB0 is released
+[18:49:11.492][admin] WSTK> 
+[18:49:11.499][vcom] tx 10
+[18:49:11.499][vcom] 
+[18:49:11.499][vcom] {{(appMode)}{PacketTx:Enabled}{N
+[18:49:11.503][vcom] one:Disabled}{Time:1784585
+[18:49:11.507][vcom] }}
+[18:49:11.507][vcom] > 
+[18:49:13.771][vcom] {{(appMode)}{None:Enabled}{PacketTx:Disabled}{Time:4043876}}
+[18:49:13.771][vcom] {{(txEnd)}{txStatus:Complete}{transmitted:10}{lastTxTime:4043792}{timePos:6}{durationUs:201}
+[18:49:13.773][vcom] {lastTxStart:4043591}{ccaSuccess:0}{failed:0}{lastTxStatus
+[18:49:13.775][vcom] :0x000000000}{txRemain:0}
+[18:49:13.782][vcom] {isAck:False}}
