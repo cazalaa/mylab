@@ -171,9 +171,12 @@ body {
 
 /* ── boutons dans les panel headers ── */
 .panel-header button {
-    height: 26px;
-    font-size: 11px;
-    border-radius: 8px;
+    height: 24px;
+    font-size: 10px;
+    border-radius: 7px;
+    padding: 0 7px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* ── boutons dans les cartes manual control ── */
@@ -322,8 +325,9 @@ button.error {
     border-bottom: 1px solid rgba(22, 27, 29, 0.08);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     background: #EFF2F9;
+    overflow: hidden;
 }
 
 .panel-title {

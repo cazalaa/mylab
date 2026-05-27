@@ -221,6 +221,24 @@ def mass_erase():
     return jsonify(results)
 
 
+@app.route("/chip_recover", methods=["POST"])
+def chip_recover():
+    adapters = request.json.get("adapters", [])
+
+    def recover(a):
+        cmd = [COMMANDER_PATH, "device", "recover",
+               "--serialno" if a["connectivityType"] == "usb" else "--ip",
+               a["serialNumber"] if a["connectivityType"] == "usb" else a["host"]]
+        return run_commander(cmd, a["serialNumber"])
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(recover, a): a for a in adapters}
+        results = [f.result() for f in as_completed(futures)]
+
+    return jsonify(results)
+
+
+
 @app.route("/fw_upgrade", methods=["POST"])
 def fw_upgrade():
     adapters = request.json.get("adapters", [])

@@ -27,8 +27,9 @@
             <span class="panel-title">Selected</span>
             <span class="panel-count" id="selectedCount">0</span>
             <div class="panel-spacer"></div>
-            <button id="eraseBtn" onclick="massErase()" >Chip Erase</button>
-            <button id="fwBtn" onclick="upgradeFW()" >Board Upgrade</button>
+            <button id="eraseBtn"   onclick="massErase()"   >Chip Erase</button>
+            <button id="recoverBtn" onclick="chipRecover()" >Chip Recover</button>
+            <button id="fwBtn"      onclick="upgradeFW()"   >Board Upgrade</button>
         </div>
         <div class="panel-body" id="selected" ondragover="event.preventDefault()" ondrop="onDrop(event)">
             <div class="drop-hint" id="dropHint">Drag adapters here or click Select All</div>
@@ -93,7 +94,7 @@ function finishProgress(allOk) {
 
 // ── lock buttons ──────────────────────────────────
 function setButtonsLocked(locked) {
-    ["refreshBtn","allBtn","saveGroupBtn","loadGroupBtn","eraseBtn","fwBtn"]
+    ["refreshBtn","allBtn","saveGroupBtn","loadGroupBtn","eraseBtn","recoverBtn","fwBtn"]
         .forEach(id => { document.getElementById(id).disabled = locked; });
 }
 
@@ -276,8 +277,9 @@ function showErrorReport(action, failed) {
         </div>`;
     document.getElementById("contentWrap").appendChild(report);
 }
-async function massErase() { await runAction("eraseBtn", "Erase", "/mass_erase", "Erasing"); }
-async function upgradeFW()  { await runAction("fwBtn",   "↑ FW",  "/fw_upgrade", "Upgrading FW"); }
+async function massErase()  { await runAction("eraseBtn",   "Erase",   "/mass_erase",  "Erasing");   }
+async function chipRecover(){ await runAction("recoverBtn", "Recover", "/chip_recover", "Recovering"); }
+async function upgradeFW()  { await runAction("fwBtn",      "↑ FW",    "/fw_upgrade",  "Upgrading FW"); }
 
 // ── selection ─────────────────────────────────────
 function addBoard(a) {
