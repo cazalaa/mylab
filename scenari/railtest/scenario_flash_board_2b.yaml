@@ -1,0 +1,23 @@
+# ── Global script ──────
+script:
+
+# ── Boards ────────-----
+boards:
+  - nickname: "4162"
+    board: "4162A"
+    connection: 192.168.0.94
+    s37_files:
+      - rail_soc_railtest_4162A.s37
+    script: railtest_script.py
+    masserase: true
+    halt_reset: false
+    open_terminal: true
+  - nickname: "2705"
+    board: "2705A"
+    connection:
+    s37_files:
+      - rail_soc_railtest_2705A.s37
+    script: railtest_script.py
+    masserase: true
+    halt_reset: false
+    open_terminal: true

@@ -1,0 +1,54 @@
+[11:27:37.700][admin] Toggling reset with 100 ms delay.
+[11:27:37.800][admin] TB> 
+[11:27:37.971][vcom] 
+[11:27:37.971][vcom] {{(reset)}{
+[11:27:37.973][vcom] App:RAILtest}{Built:May
+[11:27:37.975][vcom]  27 2026 10:33:29}{Caus
+[11:27:37.977][vcom] e:0x42}{Brd:BRD2705A}}
+[11:27:37.979][vcom] 
+[11:27:37.979][vcom] {{(radio)}{FreqHz:3900
+[11:27:37.981][vcom] 0000}{ModuleInfo:0xfffff
+[11:27:37.983][vcom] fff}{ModuleName:N/A}}
+[11:27:37.985][vcom] {{(system)}{Family:EFR3
+[11:27:37.987][vcom] 2XG28}{Part#:2}{ChipRev
+[11:27:37.989][vcom] :1.0}{sdid:235}{Part:0x
+[11:27:37.991][vcom] 031c0520}}
+[11:27:37.991][vcom] {{(pti)}{mod
+[11:27:37.993][vcom] e:2-wire-UART}{baud:160
+[11:27:37.995][vcom] 0000}{protocol:0}{radio
+[11:27:37.997][vcom] Config:0x00}}
+[11:27:37.997][vcom] > 
+[11:27:48.702][script] [delay 1.5s]
+[11:27:50.213][vcom] getchannel
+[11:27:50.213][vcom] 
+[11:27:50.213][vcom] {{(ge
+[11:27:50.216][vcom] tchannel)}{channel:0}}
+[11:27:50.218][vcom] 
+[11:27:50.218][vcom] > 
+[11:27:50.223][vcom] tx 1
+[11:27:50.223][vcom] 
+[11:27:50.223][vcom] {{(tx)}{PacketT
+[11:27:50.225][vcom] x:Enabled}{None:Disable
+[11:27:50.227][vcom] d}{Time:12252142}}
+[11:27:50.227][vcom] > {{
+[11:27:50.229][vcom] (appMode)}{None:Enabled
+[11:27:50.230][admin] ------ BOARDID board list ------
+[11:27:50.231][vcom] }{PacketTx:Disabled}{Ti
+[11:27:50.233][vcom] me:12256450}}
+[11:27:50.233][vcom] {{(txEnd
+[11:27:50.235][vcom] )}{txStatus:Complete}{t
+[11:27:50.237][vcom] ransmitted:1}{lastTxTime
+[11:27:50.239][vcom] :12256354}{timePos:6}{d
+[11:27:50.241][vcom] urationUs:404}{lastTxSt
+[11:27:50.243][vcom] art:12255950}{ccaSucces
+[11:27:50.245][vcom] s:0}{failed:0}{lastTxSt
+[11:27:50.247][vcom] atus:0x000000000}{txRema
+[11:27:50.249][vcom] in:0}{isAck:False}}
+[11:27:50.631][admin]   [A0h]  BRD2705A   Rev. A02
+[11:27:50.631][admin] TB> 
+[11:28:00.234][admin] Button press/release is not supported on this board.
+[11:28:00.234][admin] [ERROR6]: Command failed   [00000001h]
+[11:28:00.234][admin] TB> 
+[11:28:00.539][admin] Button press/release is not supported on this board.
+[11:28:00.539][admin] [ERROR6]: Command failed   [00000001h]
+[11:28:00.539][admin] TB> 

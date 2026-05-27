@@ -13,7 +13,7 @@ from random import randint
 
 def script(board):
     board.config_vcom(line_ending="CRLF", echo=True, prompt=">")
-    board.config_admin(line_ending="CRLF", echo=False, prompt="WSTK>")
+    board.config_admin(line_ending="CRLF", echo=False, prompt=">")
 
     board.reset()
     board.delay(1.5)  # wait for board to fully boot

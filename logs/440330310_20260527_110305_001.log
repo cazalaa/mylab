@@ -1,0 +1,9 @@
+# Run: 6261ac2c
+# Serial: 440330310
+# Scenario: /Users/jerome/travail/mylab/scenari/railtest
+# Started: 2026-05-27T11:03:07.974929
+# ============================================================
+
+[11:03:11.073][flash] /Users/jerome/.silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander device masserase --ip 127.0.0.1
+[11:03:11.073][flash] ERROR: 
+[11:03:11.074][error] Flash failed

@@ -254,15 +254,26 @@ def get_connections(serial_number: str, timeout: int = 8) -> dict:
     """
     Call list-connections the first time (starts Silink for USB boards), then
     use get-info for subsequent calls so only one Silink instance is spawned.
+    list-connections may return either a dict {adapter, connections} or a bare
+    list of connections — normalize to dict in both cases.
     """
     if serial_number not in _silink_started:
         url = f"{SDM_BASE}/api/adapter/{serial_number}/list-connections"
         try:
             r = requests.get(url, timeout=timeout)
             r.raise_for_status()
+            data = r.json()
             _silink_started.add(serial_number)
             print(f"[INFO] list-connections {serial_number}: Silink started")
-            return r.json()
+            # Normalize: some SDM versions return a bare list of connections
+            if isinstance(data, list):
+                # Fetch adapter info separately to get host, connectivityType etc.
+                try:
+                    info = requests.get(f"{SDM_BASE}/api/adapter/{serial_number}/get-info", timeout=5).json()
+                    data = {"adapter": info.get("adapter", {}), "connections": data}
+                except Exception:
+                    data = {"adapter": {}, "connections": data}
+            return data
         except Exception as e:
             print(f"[WARN] list-connections {serial_number}: {e} — falling back to get-info")
 
@@ -1123,7 +1134,14 @@ def _exec_board_script(board, script_code, run_id):
                       {"serial": serial, "status": status, "msg": msg},
                       room=run_room)
 
+    def log_ts(msg):
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        socketio.emit("run_output",
+                      {"serial": serial, "data": f"[{ts}] {msg}\n", "stream": "script"},
+                      room=run_room)
+
     emit_status("running")
+    log_ts("script started")
     try:
         namespace = {
             "board": board,
@@ -1133,6 +1151,7 @@ def _exec_board_script(board, script_code, run_id):
         exec(script_code, namespace)
         if "script" in namespace and callable(namespace["script"]):
             namespace["script"](board)
+        log_ts("script done")
         emit_status("done")
     except Exception as e:
         import traceback
@@ -1322,6 +1341,8 @@ class Board:
     def cli(self, cmd, timeout=10.0):
         if not self._vcom_sock:
             return ""
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[CLI] {self.nickname or self.serial} {ts} >>> {cmd}")
         payload = cmd.encode("utf-8") + self._vcom_le
 
         if self._vcom_echo and hasattr(self, '_vcom_expecting_echo'):
@@ -1341,7 +1362,9 @@ class Board:
         self._vcom_listeners.append(on_data)
         event.wait(timeout=timeout)
         self._vcom_listeners.remove(on_data)
-
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        timed_out = ">" not in "".join(response)
+        print(f"[CLI] {self.nickname or self.serial} {ts} <<< {'TIMEOUT' if timed_out else 'ok'}")
         return "".join(response)
 
     # ── ADMIN ────────────────────────────────────────────────
@@ -1356,6 +1379,8 @@ class Board:
                       room=admin_room)
 
     def admin(self, cmd, timeout=10.0):
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[ADM] {self.nickname or self.serial} {ts} >>> {cmd}")
         # High-level interpretation
         cmd_lower = cmd.strip().lower()
         if cmd_lower == "reset":
@@ -1395,12 +1420,15 @@ class Board:
         self._admin_listeners.append(on_data)
         event.wait(timeout=timeout)
         self._admin_listeners.remove(on_data)
-
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        timed_out = not event.is_set()
+        print(f"[ADM] {self.nickname or self.serial} {ts} <<< {'TIMEOUT' if timed_out else 'ok'}")
         return "".join(response)
 
     def reset(self):
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[RST] {self.nickname or self.serial} {ts}")
         result = self.admin("reset")
-        # Wait for boot banner to fully arrive — reader thread handles display
         time.sleep(1.0)
         return result
 
@@ -1437,6 +1465,8 @@ class Board:
         return data.decode("utf-8", errors="replace")
 
     def delay(self, seconds):
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[DLY] {self.nickname or self.serial} {ts} {seconds}s")
         self.print(f"[delay {seconds}s]")
         time.sleep(seconds)
 
@@ -1694,10 +1724,11 @@ def scenario_run():
             # No board_id or no match by type → pick first available adapter
             if not adapter and adapters_data:
                 adapter = adapters_data[0]
-            # If the chosen adapter is reachable via IP, use that instead of USB serial
+            # If the chosen adapter is reachable via a real external IP, use it
+            # 127.0.0.1 means the board is local (USB via SDM) — keep connection=usb
             if adapter:
                 adapter_host = adapter.get("host", "").strip()
-                if adapter_host:
+                if adapter_host and adapter_host != "127.0.0.1":
                     connection = adapter_host
 
         if not adapter:
@@ -1849,14 +1880,109 @@ def scenario_run():
                               {"serial": "_scenario_", "data": tb, "stream": "error"},
                               room=run_room)
         else:
-            # ── Mode without global script (original behaviour) ───
-            with ThreadPoolExecutor(max_workers=len(resolved_boards)) as executor:
-                futures = [
-                    executor.submit(_run_board, bc, scenario_dir, run_id, bc["_script_code"])
-                    for bc in resolved_boards
-                ]
-                for f in as_completed(futures):
-                    pass
+            # ── Mode without global script ────────────────────────
+            # Same 3-phase parallel execution as global script mode
+            run_room = f"run_{run_id}"
+
+            # Emit initial nicknames + flashing status
+            for bc in resolved_boards:
+                serial   = bc["_resolved_serial"]
+                nickname = bc.get("_nickname")
+                if nickname:
+                    socketio.emit("run_board_nickname",
+                                  {"serial": serial, "nickname": nickname},
+                                  room=run_room)
+                active_runs[run_id]["boards"][serial] = "flashing"
+                socketio.emit("run_board_status",
+                              {"serial": serial, "status": "flashing"},
+                              room=run_room)
+
+            # Phase 1: flash all boards in parallel
+            failed = set()
+            t0 = datetime.datetime.now()
+            print(f"[RUN] Phase 1 flash start {t0.strftime('%H:%M:%S.%f')[:-3]} boards={[bc['_resolved_serial'] for bc in resolved_boards]}")
+            with ThreadPoolExecutor(max_workers=len(resolved_boards)) as ex:
+                flash_futures = {ex.submit(_flash_board, bc, scenario_dir, run_id): bc
+                                 for bc in resolved_boards}
+                for fut in as_completed(flash_futures):
+                    bc     = flash_futures[fut]
+                    serial = bc["_resolved_serial"]
+                    try:
+                        ok, flash_log = fut.result()
+                    except Exception as e:
+                        ok, flash_log = False, [str(e)]
+                    if not ok:
+                        failed.add(serial)
+                        active_runs[run_id]["boards"][serial] = "error"
+                        socketio.emit("run_board_status",
+                                      {"serial": serial, "status": "error", "msg": "Flash failed"},
+                                      room=run_room)
+
+            # Phase 2: connect all successful boards in parallel
+            board_objs = []  # list of (board_obj, bc) tuples
+            print(f"[RUN] Phase 2 connect start {datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
+            def connect_board(bc):
+                serial = bc["_resolved_serial"]
+                if serial in failed:
+                    return None, bc
+                active_runs[run_id]["boards"][serial] = "connecting"
+                socketio.emit("run_board_status",
+                              {"serial": serial, "status": "connecting"},
+                              room=run_room)
+                try:
+                    info    = get_connections(serial)
+                    adapter = info.get("adapter", {})
+                    conns   = info.get("connections", [])
+                    ports   = {c["portName"]: c["portNumber"] for c in conns}
+                    connectivity = adapter.get("connectivityType", "usb")
+                    host    = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
+                    vcom_port  = ports.get("serial1")
+                    admin_port = ports.get("admin")
+                    if not vcom_port or not admin_port:
+                        raise RuntimeError("Could not get ports from SDM")
+                    board_obj = Board(
+                        serial        = serial,
+                        host          = host,
+                        vcom_port     = vcom_port,
+                        admin_port    = admin_port,
+                        run_id        = run_id,
+                        scenario_dir  = scenario_dir,
+                        open_terminal = bc.get("open_terminal", False),
+                        nickname      = bc.get("_nickname"),
+                    )
+                    board_obj._log_path = get_log_file(serial)
+                    board_obj.connect()
+                    active_runs[run_id]["boards"][serial] = "ready"
+                    socketio.emit("run_board_status",
+                                  {"serial": serial, "status": "ready"},
+                                  room=run_room)
+                    return board_obj, bc
+                except Exception as e:
+                    failed.add(serial)
+                    active_runs[run_id]["boards"][serial] = "error"
+                    socketio.emit("run_board_status",
+                                  {"serial": serial, "status": "error", "msg": str(e)},
+                                  room=run_room)
+                    return None, bc
+
+            with ThreadPoolExecutor(max_workers=len(resolved_boards)) as ex:
+                connect_futures = {ex.submit(connect_board, bc): bc for bc in resolved_boards}
+                for fut in as_completed(connect_futures):
+                    board_obj, bc = fut.result()
+                    if board_obj:
+                        board_objs.append((board_obj, bc))
+
+            # Phase 3: run board scripts in parallel
+            print(f"[RUN] Phase 3 scripts start {datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]} boards={[b.serial for b,_ in board_objs]}")
+            if board_objs:
+                with ThreadPoolExecutor(max_workers=len(board_objs)) as ex:
+                    futures = [
+                        ex.submit(_exec_board_script, board_obj, bc["_script_code"], run_id)
+                        for board_obj, bc in board_objs
+                    ]
+                    for fut in as_completed(futures):
+                        try: fut.result()
+                        except: pass
 
         active_runs[run_id]["status"] = "done"
         socketio.emit("run_done", {"run_id": run_id}, room=f"run_{run_id}")
