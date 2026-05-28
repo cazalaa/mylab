@@ -1,9 +1,0 @@
-# Run: 9af5dfd0
-# Serial: 440114849
-# Scenario: /Users/jerome/travail/mylab/scenari/railtest
-# Started: 2026-05-25T22:14:59.556736
-# ============================================================
-
-[22:15:06.085][flash] /Users/jerome/.silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander device masserase --ip 192.168.0.94
-[22:15:06.086][flash] /Users/jerome/.silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander flash /Users/jerome/travail/mylab/scenari/railtest/rail_soc_railtest_4162A.s37 --ip 192.168.0.94
-[22:15:17.106][script] [delay 1.5s]
