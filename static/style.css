@@ -573,7 +573,6 @@ button.error {
 .group-panel {
     display: none;
     position: fixed;
-    top: 60px;
     width: 300px;
     background: #EFF2F9;
     border: none;

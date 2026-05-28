@@ -2,8 +2,9 @@
 
 <!-- barre groupe centrée -->
 <div class="test-source-bar" style="gap:12px; margin-bottom:14px;">
-    <button id="saveGroupBtn" onclick="toggleGroupPanel('save','saveGroupBtn')">Save Group</button>
-    <button id="loadGroupBtn" onclick="toggleGroupPanel('load','loadGroupBtn')">Load Group</button>
+    <button id="saveGroupBtn"   onclick="toggleGroupPanel('save','saveGroupBtn')">Save Group</button>
+    <button id="loadGroupBtn"   onclick="toggleGroupPanel('load','loadGroupBtn')">Load Group</button>
+    <button id="deleteGroupBtn" onclick="toggleGroupPanel('delete','deleteGroupBtn')">Delete Group</button>
 </div>
 
 <div class="grid">
@@ -55,15 +56,15 @@
 </div>
 
 <script>
-let selected = window.appState.selected;
-let cache    = window.appState.cache;
-let groupPanelMode = null;
+var selected = (window.appState && window.appState.selected) || new Set();
+var cache    = (window.appState && window.appState.cache)    || [];
+var groupPanelMode = null;
 
 function onPageLoad() {
-    // Cache déjà chargé par index.html, on affiche juste
+    selected = (window.appState && window.appState.selected) || new Set();
+    cache    = (window.appState && window.appState.cache)    || [];
     updateCounts();
     if (selected.size > 0) renderSelected();
-    // Puis on rafraîchit pour avoir les adapters live
     load();
 }
 
@@ -94,8 +95,8 @@ function finishProgress(allOk) {
 
 // ── lock buttons ──────────────────────────────────
 function setButtonsLocked(locked) {
-    ["refreshBtn","allBtn","saveGroupBtn","loadGroupBtn","eraseBtn","recoverBtn","fwBtn"]
-        .forEach(id => { document.getElementById(id).disabled = locked; });
+    ["refreshBtn","allBtn","saveGroupBtn","loadGroupBtn","deleteGroupBtn","eraseBtn","recoverBtn","fwBtn"]
+        .forEach(id => { const el = document.getElementById(id); if (el) el.disabled = locked; });
 }
 
 // ── refresh ───────────────────────────────────────
@@ -116,7 +117,7 @@ async function refresh() {
 async function load() {
     const res = await fetch('/adapters');
     cache = await res.json();
-    window.appState.cache = cache;
+    if (window.appState) window.appState.cache = cache;
 
     const list = document.getElementById("list");
     list.innerHTML = "";
@@ -305,19 +306,27 @@ function closeGroupPanel() {
 async function toggleGroupPanel(mode, anchorId) {
     const panel  = document.getElementById("groupPanel");
     const isOpen = panel.classList.contains("visible") && groupPanelMode === mode;
-    if (isOpen) { closeGroupPanel(); return; }
+    // Always remove visible first to reset state cleanly
+    panel.classList.remove("visible");
+    if (isOpen) { groupPanelMode = null; return; }
+
+    groupPanelMode = mode;
+    const titles = { save: "Save group", load: "Load group", delete: "Delete group" };
+    document.getElementById("groupPanelTitle").innerText = titles[mode] || mode;
+    document.getElementById("saveRow").style.display = mode === "save" ? "flex" : "none";
 
     const anchor = document.getElementById(anchorId);
     const rect   = anchor.getBoundingClientRect();
-    panel.style.right = (window.innerWidth - rect.right) + "px";
-
-    groupPanelMode = mode;
-    panel.classList.add("visible");
-    document.getElementById("groupPanelTitle").innerText = mode === "save" ? "Save group" : "Load group";
-    document.getElementById("saveRow").style.display     = mode === "save" ? "flex" : "none";
-    if (mode === "save") setTimeout(() => document.getElementById("groupNameInput").focus(), 50);
+    panel.style.top   = (rect.bottom + 6) + "px";
+    const panelW = 300;
+    let left = rect.left + (rect.width / 2) - (panelW / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - panelW - 8));
+    panel.style.left  = left + "px";
+    panel.style.right = "auto";
 
     await refreshGroupList(mode);
+    panel.classList.add("visible");
+    if (mode === "save") setTimeout(() => document.getElementById("groupNameInput").focus(), 50);
 }
 
 async function refreshGroupList(mode) {
@@ -338,22 +347,35 @@ async function refreshGroupList(mode) {
 
         const item = document.createElement("div");
         item.className = "group-item";
+        // Show 🗑 in save and delete mode, hide in load mode
+        const delVisible = mode !== "load";
         item.innerHTML = `
             <span class="group-item-name">${name}</span>
             <span class="group-item-count">${count} adapter${count !== 1 ? "s" : ""}</span>
-            <span class="group-item-del" title="Delete">🗑</span>`;
+            <span class="group-item-del" title="Delete" style="${delVisible ? '' : 'display:none'}">🗑</span>`;
 
-        const onSelect = () => {
-            if (mode === "load") loadGroup(name, gdata);
-            else document.getElementById("groupNameInput").value = name;
-        };
-        item.querySelector(".group-item-name").onclick  = onSelect;
-        item.querySelector(".group-item-count").onclick = onSelect;
-        item.querySelector(".group-item-del").onclick   = async (e) => {
+        const doDelete = async (e) => {
             e.stopPropagation();
             await fetch(`/groups/${encodeURIComponent(name)}`, { method: "DELETE" });
             await refreshGroupList(mode);
         };
+
+        if (mode === "delete") {
+            // In delete mode: clicking name/count or 🗑 all delete
+            item.querySelector(".group-item-name").onclick  = doDelete;
+            item.querySelector(".group-item-count").onclick = doDelete;
+            item.querySelector(".group-item-del").onclick   = doDelete;
+        } else if (mode === "load") {
+            const onSelect = () => loadGroup(name, gdata);
+            item.querySelector(".group-item-name").onclick  = onSelect;
+            item.querySelector(".group-item-count").onclick = onSelect;
+        } else {
+            // save mode: click name/count to prefill, 🗑 to delete
+            const onSelect = () => { document.getElementById("groupNameInput").value = name; };
+            item.querySelector(".group-item-name").onclick  = onSelect;
+            item.querySelector(".group-item-count").onclick = onSelect;
+            item.querySelector(".group-item-del").onclick   = doDelete;
+        }
 
         container.appendChild(item);
     }
