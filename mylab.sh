@@ -78,7 +78,7 @@ cmd_run() {
     echo ""
     info "Démarrage de My Lab..."
     cd "$SCRIPT_DIR"
-    exec "$PYTHON" my_lab.py
+    exec "$PYTHON" my_lab.py "$@"
 }
 
 # ── dispatch ──────────────────────────────────────────────────
@@ -86,5 +86,6 @@ case "${1:-}" in
     --install) cmd_install ;;
     --clean)   cmd_clean   ;;
     "")        cmd_run     ;;
-    *)         echo "Usage : ./mylab.sh [--install | --clean]"; exit 1 ;;
+    --traces)  cmd_run --traces ;;
+    *)         echo "Usage : ./mylab.sh [--install | --clean | --traces]"; exit 1 ;;
 esac

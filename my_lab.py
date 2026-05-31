@@ -2043,9 +2043,24 @@ def handle_join_run(data):
 
 # ----------------------------
 if __name__ == "__main__":
+    TRACES = "--traces" in sys.argv
+
+    # Silence all print() output unless --traces
+    if not TRACES:
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+
     restart_sdm()
+
+    import logging
+    log_level = logging.DEBUG if TRACES else logging.ERROR
+    logging.getLogger("werkzeug").setLevel(log_level)
+    logging.getLogger("socketio").setLevel(log_level)
+    logging.getLogger("engineio").setLevel(log_level)
+
     t = threading.Thread(
-        target=lambda: socketio.run(app, port=WEB_PORT, debug=False, use_reloader=False)
+        target=lambda: socketio.run(app, port=WEB_PORT, debug=False,
+                                    use_reloader=False, log_output=TRACES)
     )
     t.daemon = True
     t.start()

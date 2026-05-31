@@ -14,8 +14,9 @@ set "PYTHON=%VENV%\Scripts\python.exe"
 
 if "%~1"=="--install" goto :install
 if "%~1"=="--clean"   goto :clean
+if "%~1"=="--traces"  goto :run_traces
 if "%~1"==""          goto :run
-echo Usage: mylab.bat [--install ^| --clean]
+echo Usage: mylab.bat [--install ^| --clean ^| --traces]
 exit /b 1
 
 :: ── --install ─────────────────────────────────────────────────
@@ -81,3 +82,14 @@ echo.
 echo ^[→^] Demarrage de My Lab...
 cd /d "%SCRIPT_DIR%"
 "%PYTHON%" my_lab.py
+goto :eof
+
+:run_traces
+if not exist "%PYTHON%" (
+    echo ^[✗^] Virtualenv introuvable. Lancer d'abord : mylab.bat --install
+    exit /b 1
+)
+echo.
+echo ^[→^] Demarrage de My Lab ^(traces actives^)...
+cd /d "%SCRIPT_DIR%"
+"%PYTHON%" my_lab.py --traces
