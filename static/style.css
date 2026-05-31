@@ -579,7 +579,7 @@ button.error {
     border-radius: 16px;
     box-shadow:
         6px  6px 16px rgba(22, 27, 29, 0.23);
-    z-index: 100;
+    z-index: 9999;
     overflow: hidden;
 }
 
@@ -1025,3 +1025,5 @@ button.error {
     background: #EFF2F9;
     border-bottom: 1px solid rgba(22, 27, 29, 0.08);
 }
+
+

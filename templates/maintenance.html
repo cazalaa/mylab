@@ -15,6 +15,7 @@
             <span class="panel-title">Available</span>
             <span class="panel-count" id="availableCount">0</span>
             <div class="panel-spacer"></div>
+            <button id="myDeskBtn" onclick="toggleMyDesk()" class="btn-toggle">My Desk</button>
             <button id="refreshBtn" onclick="refresh()" data-icon="Refresh">Refresh</button>
             <div class="btn-sep"></div>
             <button id="allBtn" onclick="addAll()">Select All</button>
@@ -65,12 +66,28 @@ function onPageLoad() {
     cache    = (window.appState && window.appState.cache)    || [];
     updateCounts();
     if (selected.size > 0) renderSelected();
-    load();
+    load().then(() => {
+        const btn = document.getElementById("myDeskBtn");
+        if (btn) btn.classList.toggle("open", myDesk);
+    });
+}
+
+var myDesk = false;
+
+async function toggleMyDesk() {
+    myDesk = !myDesk;
+    await load();
+    const btn = document.getElementById("myDeskBtn");
+    if (btn) btn.classList.toggle("open", myDesk);
+}
+
+function visibleCache() {
+    return myDesk ? cache.filter(a => a.connectivityType === "usb") : cache;
 }
 
 // ── counts ────────────────────────────────────────
 function updateCounts() {
-    document.getElementById("availableCount").innerText = cache.length;
+    document.getElementById("availableCount").innerText = visibleCache().length;
     document.getElementById("selectedCount").innerText  = selected.size;
 }
 
@@ -95,7 +112,7 @@ function finishProgress(allOk) {
 
 // ── lock buttons ──────────────────────────────────
 function setButtonsLocked(locked) {
-    ["refreshBtn","allBtn","saveGroupBtn","loadGroupBtn","deleteGroupBtn","eraseBtn","recoverBtn","fwBtn"]
+    ["refreshBtn","allBtn","myDeskBtn","saveGroupBtn","loadGroupBtn","deleteGroupBtn","eraseBtn","recoverBtn","fwBtn"]
         .forEach(id => { const el = document.getElementById(id); if (el) el.disabled = locked; });
 }
 
@@ -128,7 +145,7 @@ async function load() {
         return;
     }
 
-    cache.forEach(a => {
+    visibleCache().forEach(a => {
         const card = document.createElement("div");
         card.className = "board-card";
         card.draggable = true;
@@ -290,7 +307,7 @@ function addBoard(a) {
     load();
 }
 
-function addAll() { cache.forEach(addBoard); }
+function addAll() { visibleCache().forEach(addBoard); }
 
 function onDrop(e) {
     const a = JSON.parse(e.dataTransfer.getData("t"));

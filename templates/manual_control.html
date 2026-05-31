@@ -51,8 +51,12 @@ async function refreshSourceList() {
     const container = document.getElementById("sourceList");
     container.innerHTML = "";
 
-    const allCount = (window.appState.cache || []).length;
-    addSourceItem(container, "available", "All available", allCount, testSource === "available");
+    const cache    = window.appState.cache || [];
+    const allCount = cache.length;
+    const usbCount = cache.filter(a => a.connectivityType === "usb").length;
+
+    addSourceItem(container, "available",  "All available",  allCount, testSource === "available");
+    addSourceItem(container, "mydesk",     "Only my desk",   usbCount, testSource === "mydesk");
 
     try {
         const res   = await fetch("/groups");
@@ -85,8 +89,8 @@ function addSourceItem(container, key, label, count, active, gdata) {
 
 function selectSource(key, gdata) {
     testSource = key;
-    document.getElementById("testSourceBtn").innerText =
-        key === "available" ? "All available" : key;
+    const labels = { available: "All available", mydesk: "Only my desk" };
+    document.getElementById("testSourceBtn").innerText = labels[key] || key;
     renderFromSource(key, gdata);
 }
 
@@ -97,6 +101,8 @@ async function renderFromSource(key, gdata) {
     let adapters = [];
     if (key === "available") {
         adapters = cache;
+    } else if (key === "mydesk") {
+        adapters = cache.filter(a => a.connectivityType === "usb");
     } else {
         if (!gdata) {
             try {
