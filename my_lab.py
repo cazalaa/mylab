@@ -29,7 +29,7 @@ SCENARI_DIR = os.path.join(_BASE_DIR, "scenari")
 os.makedirs(GROUPS_DIR, exist_ok=True)
 
 # Dimensions
-WIN_W          = 800
+WIN_W          = 900
 WIN_COLLAPSED  = 65   # hauteur barre compacte
 WIN_EXPANDED   = 700   # hauteur dépliée
 
