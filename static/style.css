@@ -318,6 +318,9 @@ button.error {
     box-shadow:
         -8px -8px 16px rgba(250, 251, 255, 1),
          8px  8px 16px rgba(22, 27, 29, 0.23);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .panel-header {
@@ -362,7 +365,14 @@ button.error {
     padding: 10px;
     min-height: 120px;
     background: #EFF2F9;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
 }
+
+.panel-body::-webkit-scrollbar { width: 5px; }
+.panel-body::-webkit-scrollbar-track { background: transparent; }
+.panel-body::-webkit-scrollbar-thumb { background: #b5bfc6; border-radius: 3px; }
 
 /* ── board cards (available) ── */
 
@@ -564,6 +574,11 @@ button.error {
     border: 1.5px dashed rgba(22, 27, 29, 0.12);
     border-radius: 12px;
     background: #EFF2F9;
+    min-height: calc(100% - 4px);
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .panel-body.drag-over { background: #f0f8f5; }
