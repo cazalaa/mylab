@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Lab — User Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #f4f6fb;
+  --surface:  #ffffff;
+  --accent:   #185FA5;
+  --accent2:  #0d3d6e;
+  --green:    #1D9E75;
+  --orange:   #EF9F27;
+  --red:      #E24B4A;
+  --text:     #1a2630;
+  --mid:      #4a5a68;
+  --light:    #8899aa;
+  --rule:     #d8dde5;
+  --code-bg:  #1e2a35;
+  --code-fg:  #cdd9e5;
+  --note-bg:  #e8f0fb;
+  --radius:   12px;
+  --shadow:   0 4px 24px rgba(22,27,29,0.10);
+  --shadow-lg:0 8px 48px rgba(22,27,29,0.16);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+/* ── Layout ── */
+.layout { display: flex; min-height: 100vh; }
+
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--accent2);
+  padding: 32px 0 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-brand {
+  padding: 0 24px 28px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  margin-bottom: 20px;
+}
+.sidebar-brand h1 {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  color: white;
+  letter-spacing: -.5px;
+}
+.sidebar-brand p {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+
+.nav-section {
+  padding: 0 16px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: rgba(255,255,255,0.35);
+  margin-top: 16px;
+}
+
+.sidebar nav a {
+  display: block;
+  padding: 7px 24px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.65);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: all .15s;
+}
+.sidebar nav a:hover,
+.sidebar nav a.active {
+  color: white;
+  border-left-color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.06);
+}
+.sidebar nav a.sub { padding-left: 36px; font-size: 12px; }
+
+/* Main content */
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: 48px 56px 80px;
+  max-width: 880px;
+}
+
+/* ── Typography ── */
+h1.page-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 42px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -1px;
+  margin-bottom: 8px;
+}
+.page-subtitle {
+  font-size: 16px;
+  color: var(--light);
+  margin-bottom: 48px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--rule);
+}
+
+h2 {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 56px 0 16px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+  scroll-margin-top: 24px;
+}
+h2:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
+
+h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--mid);
+  margin: 28px 0 10px;
+  scroll-margin-top: 24px;
+}
+
+p { margin-bottom: 14px; color: var(--mid); }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+ul, ol { margin: 0 0 14px 20px; color: var(--mid); }
+li { margin-bottom: 6px; }
+li::marker { color: var(--accent); }
+
+/* ── Components ── */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px 32px;
+  margin: 20px 0;
+}
+
+pre, code {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.code-block {
+  background: var(--code-bg);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin: 16px 0;
+  overflow-x: auto;
+  color: var(--code-fg);
+  font-size: 13px;
+  line-height: 1.7;
+  box-shadow: var(--shadow);
+}
+.code-block .c { color: #5a7a94; font-style: italic; }
+.code-block .k { color: #7eb8d4; }
+.code-block .s { color: #98d4a0; }
+.code-block .n { color: var(--code-fg); }
+
+code {
+  background: #e8edf5;
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.note {
+  background: var(--note-bg);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13.5px;
+  color: var(--mid);
+}
+.note strong { color: var(--accent); }
+
+.figure {
+  margin: 24px 0;
+  text-align: center;
+}
+.figure img {
+  max-width: 100%;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--rule);
+}
+.figure figcaption {
+  font-size: 12px;
+  color: var(--light);
+  margin-top: 10px;
+  font-style: italic;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 16px 0;
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+th {
+  background: var(--accent);
+  color: white;
+  padding: 10px 14px;
+  font-weight: 500;
+  text-align: left;
+  font-size: 12px;
+}
+td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--mid);
+  vertical-align: top;
+}
+td:first-child { font-family: 'IBM Plex Mono', monospace; color: var(--text); font-size: 12px; }
+tr:last-child td { border-bottom: none; }
+tr:nth-child(even) td { background: #f8fafd; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.badge-blue   { background: #dbeafe; color: #1d4ed8; }
+.badge-green  { background: #d1fae5; color: #065f46; }
+.badge-orange { background: #fed7aa; color: #92400e; }
+
+/* ── Cover section ── */
+.cover {
+  background: linear-gradient(135deg, var(--accent2) 0%, var(--accent) 100%);
+  border-radius: 16px;
+  padding: 48px;
+  margin-bottom: 48px;
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+.cover::before {
+  content: '';
+  position: absolute;
+  right: -40px; top: -40px;
+  width: 200px; height: 200px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.05);
+}
+.cover h1 {
+  font-family: 'Playfair Display', serif;
+  font-size: 52px;
+  color: white;
+  margin-bottom: 8px;
+}
+.cover p { color: rgba(255,255,255,0.75); font-size: 16px; margin-bottom: 0; }
+.cover .version { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: rgba(255,255,255,0.45); margin-top: 20px; }
+
+/* ── Scrollbar ── */
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+/* ── Section anchors ── */
+section { scroll-margin-top: 0; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h1>My Lab</h1>
+    <p>User Guide · v1.0</p>
+  </div>
+  <nav>
+    <div class="nav-section">Installation</div>
+    <a href="#prerequisites">Prerequisites</a>
+    <a href="#install-steps">Installation steps</a>
+    <a href="#configuration">Configuration</a>
+    <a href="#launch">Launch scripts</a>
+
+    <div class="nav-section">Application</div>
+    <a href="#overview">Overview</a>
+    <a href="#sdm">SDM</a>
+    <a href="#maintenance">Maintenance</a>
+    <a href="#manual-control">Manual Control</a>
+    <a href="#script-control">Script Control</a>
+
+    <div class="nav-section">Scripting</div>
+    <a href="#scenario-yaml">Scenario YAML</a>
+    <a href="#global-script">Global script</a>
+    <a href="#board-script">Board script</a>
+  </nav>
+</aside>
+
+<!-- ── Main ── -->
+<main class="main">
+
+<!-- Cover -->
+<div class="cover">
+  <h1>My Lab</h1>
+  <p>Manage your adapter desk, maintain your boards, and automate repetitive actions with Python scripts</p>
+  <div class="version">v1.0 · 2026 · Installation · Operation · Scripting</div>
+</div>
+
+<!-- ══════════════════════════════ CHAPTER 1 ══════════════════════════════ -->
+<section id="installation">
+<h2>1 — Installation</h2>
+
+<h3 id="prerequisites">Prerequisites</h3>
+<p>Ensure the following are available on the host machine before proceeding:</p>
+<ul>
+  <li><strong>Python 3.10 or later</strong> — verify with <code>python3 --version</code></li>
+  <li><strong>Simplicity Device Manager (SDM)</strong> — provided by Silicon Labs SLT or Simplicity Studio</li>
+  <li><strong>Simplicity Commander</strong> — provided by the Simplicity Commander package</li>
+</ul>
+<div class="note"><strong>ℹ</strong> My Lab auto-detects both binaries under <code>~/.silabs/</code>. Manual paths can be set in <code>config.ini</code> if auto-detection fails.</div>
+
+<h3 id="install-steps">Installation Steps</h3>
+<p><strong>Step 1</strong> — Unzip the archive:</p>
+<div class="code-block"><pre>unzip Archive_clean.zip
+cd projet</pre></div>
+
+<p><strong>Step 2</strong> — Create a virtual environment (recommended):</p>
+<div class="code-block"><pre><span class="c"># macOS / Linux</span>
+python3 -m venv .venv
+source .venv/bin/activate
+
+<span class="c"># Windows</span>
+python3 -m venv .venv
+.venv\Scripts\activate</pre></div>
+
+<p><strong>Step 3</strong> — Install Python dependencies:</p>
+<div class="code-block"><pre>pip install -r requirements.txt</pre></div>
+
+<p><strong>Step 4</strong> — Install the platform-specific pywebview backend:</p>
+<div class="code-block"><pre><span class="c"># macOS</span>
+pip install pyobjc-framework-WebKit
+
+<span class="c"># Windows</span>
+pip install "pywebview[winforms]"</pre></div>
+
+<h3 id="configuration">Configuration</h3>
+<p>Edit <code>config.ini</code> if auto-detection of SDM or Commander fails:</p>
+<div class="code-block"><pre>[paths]
+sdm       =   <span class="c"># empty = auto-detect in ~/.silabs</span>
+commander =   <span class="c"># empty = auto-detect in ~/.silabs</span>
+
+[server]
+host     = 127.0.0.1
+port     = 3129   <span class="c"># SDM port — do not change</span>
+web_port = 8080   <span class="c"># internal Flask port (configurable)</span></pre></div>
+
+<h3 id="launch">Launch Scripts</h3>
+<p>Platform-specific scripts handle installation, launch, and cleanup:</p>
+<table>
+  <thead><tr><th>Action</th><th>macOS / Linux</th><th>Windows</th></tr></thead>
+  <tbody>
+    <tr><td>Install venv + dependencies</td><td>./mylab.sh --install</td><td>mylab.bat --install</td></tr>
+    <tr><td>Launch the application</td><td>./mylab.sh</td><td>mylab.bat</td></tr>
+    <tr><td>Launch with traces</td><td>./mylab.sh --traces</td><td>mylab.bat --traces</td></tr>
+    <tr><td>Clean logs and groups</td><td>./mylab.sh --clean</td><td>mylab.bat --clean</td></tr>
+  </tbody>
+</table>
+<div class="note"><strong>ℹ</strong> On macOS, run <code>chmod +x mylab.sh</code> once before the first launch. By default all console output is silent — use <code>--traces</code> to enable logging.</div>
+</section>
+
+<!-- ══════════════════════════════ CHAPTER 2 ══════════════════════════════ -->
+<section id="overview">
+<h2>2 — Application Overview</h2>
+<p>My Lab is a desktop application (Python · Flask · SocketIO · pywebview) that provides a unified interface for managing Silicon Labs development boards via USB or Ethernet. Four sections are accessible from the top navigation bar.</p>
+
+<div class="figure">
+  <img src="img/img_topbar.png" alt="My Lab navigation bar">
+  <figcaption>Figure 1 — My Lab navigation bar: SDM, Maintenance, Manual Control, Script Control</figcaption>
+</div>
+
+<p>The application starts as a compact collapsed bar. Clicking any tab expands the window to reveal the corresponding page. SDM is started automatically at launch — stale Silink instances from previous sessions are cleaned up by a stop/start cycle.</p>
+</section>
+
+<section id="sdm">
+<h2>SDM</h2>
+<p>The SDM tab opens the Simplicity Device Manager web interface embedded in the application. It lists all connected adapters with their nickname, board model, serial number, and connection type (USB or Ethernet IP). The Refresh button rescans for newly connected boards.</p>
+
+<div class="figure">
+  <img src="img/img_sdm.png" alt="SDM interface">
+  <figcaption>Figure 2 — SDM showing a connected EFR32MG12 board at 192.168.0.94</figcaption>
+</div>
+<div class="note"><strong>ℹ</strong> The SDM tab is informational only. Use Maintenance or Manual Control to act on boards.</div>
+</section>
+
+<section id="maintenance">
+<h2>Maintenance</h2>
+<p>The Maintenance page handles fleet-level operations. The <strong>Available</strong> panel lists all adapters detected by SDM. The <strong>Selected</strong> panel holds boards chosen for action. Move boards by drag-and-drop or via Select All. A <strong>My Desk</strong> toggle filters to USB-only adapters.</p>
+
+<div class="figure">
+  <img src="img/img_maintenance.png" alt="Maintenance page">
+  <figcaption>Figure 3 — Maintenance: available boards (left), selected panel with action buttons (right)</figcaption>
+</div>
+
+<h3>Group Management</h3>
+<ul>
+  <li><strong>Save Group</strong> — save the current selection under a name (stores serial, type, IP, nickname, board ID)</li>
+  <li><strong>Load Group</strong> — restore a previously saved selection</li>
+  <li><strong>Delete Group</strong> — permanently remove a saved group</li>
+</ul>
+
+<h3>Board Actions</h3>
+<p>Three buttons in the Selected panel header act on all selected boards simultaneously and in parallel:</p>
+<table>
+  <thead><tr><th>Button</th><th>Commander Command</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>Chip Erase</td><td>device masserase</td><td>Full chip mass erase</td></tr>
+    <tr><td>Chip Recover</td><td>device recover</td><td>Recovers a locked or bricked chip</td></tr>
+    <tr><td>Board Upgrade</td><td>adapter fwupgrade</td><td>Upgrades the J-Link adapter firmware</td></tr>
+  </tbody>
+</table>
+<div class="note"><strong>ℹ</strong> USB boards use <code>--serialno &lt;serial&gt;</code>, Ethernet boards use <code>--ip &lt;address&gt;</code> automatically.</div>
+</section>
+
+<section id="manual-control">
+<h2>Manual Control</h2>
+<p>The Manual Control page provides direct hardware control per board. A source selector filters by group or shows all boards. Each card shows serial number, nickname, board model, and connection address.</p>
+
+<div class="figure">
+  <img src="img/img_manual.png" alt="Manual Control page">
+  <figcaption>Figure 4 — Manual Control: board card with Cli, Reset, Pb1, and Pb0 buttons</figcaption>
+</div>
+
+<ul>
+  <li><strong>Cli</strong> — opens a terminal window (VCOM + ADMIN tabs)</li>
+  <li><strong>Reset</strong> — immediate hardware reset of the board target</li>
+  <li><strong>Pb1 / Pb0</strong> — simulates push button press and release</li>
+  <li><strong>Only my desk</strong> — source filter showing USB-only adapters</li>
+</ul>
+
+<p>The terminal window shows two tabs: <strong>VCOM</strong> for CLI commands and <strong>ADMIN</strong> for the J-Link admin interface. Hardware control buttons (Reset, PB0, PB1) are also available at the bottom of the terminal.</p>
+
+<div class="figure">
+  <img src="img/img_terminal.png" alt="Terminal window">
+  <figcaption>Figure 5 — Terminal window: VCOM output, ADMIN tab, hardware buttons</figcaption>
+</div>
+</section>
+
+<section id="script-control">
+<h2>Script Control</h2>
+<p>Script Control enables automated multi-board test execution using YAML scenario files paired with Python scripts.</p>
+
+<div class="figure">
+  <img src="img/img_script.png" alt="Script Control page">
+  <figcaption>Figure 6 — Script Control: scenario browser (left), structured sections editor (right)</figcaption>
+</div>
+
+<h3>Toolbar</h3>
+<ul>
+  <li><strong>Load</strong> — select an existing scenario; the right panel shows collapsible sections (Global Script + one per board) that can be expanded and edited inline</li>
+  <li><strong>Create</strong> — start a new scenario with the same structured sections view, pre-populated with one global script entry and one board</li>
+  <li><strong>Check</strong> — validate the scenario against connected boards; reports errors and warnings</li>
+  <li><strong>Run</strong> — execute the scenario (enabled after a successful Check)</li>
+</ul>
+
+<h3>Run Panel</h3>
+<p>When a scenario runs, the Run panel appears: left 1/3 shows a status card per board (erasing → flashing → connecting → running → done/error); right 2/3 shows a timestamped log.</p>
+
+<div class="figure">
+  <img src="img/img_runpanel.png" alt="Run panel">
+  <figcaption>Figure 7 — Run panel: board status cards (left), script output log (right)</figcaption>
+</div>
+</section>
+
+
+<!-- ══════════════════════════════ CHAPTER 3 ══════════════════════════════ -->
+<section id="scripting">
+<h2>3 — Scripting Reference</h2>
+<p>My Lab scripts are standard Python files executed during a scenario run. The YAML scenario file is the entry point — it declares which boards to flash, which scripts to run, and how everything connects together.</p>
+</section>
+
+<section id="scenario-yaml">
+<h2>Scenario YAML</h2>
+<p>YAML files in <code>scenari/</code> (or subdirectories). The scenario file organises everything: it references the global script, the per-board configuration, firmware files, and individual board scripts. All fields are optional except <code>boards:</code>.</p>
+
+<h3>Complete Example</h3>
+<div class="code-block"><pre><span class="c"># scenario_rf_test.yaml</span>
+
+<span class="c"># Optional global orchestration script</span>
+<span class="k">script</span>: global_script.py
+
+<span class="k">boards</span>:
+  - <span class="k">nickname</span>: <span class="s">"tx"</span>              <span class="c"># used with scenario.board("tx")</span>
+    <span class="k">board</span>: <span class="s">"4162A"</span>              <span class="c"># board type for USB auto-matching</span>
+    <span class="k">connection</span>: 192.168.0.94   <span class="c"># IP address, "usb", or empty</span>
+    <span class="k">s37_files</span>:
+      - rail_soc_railtest_4162A.s37
+    <span class="k">script</span>: railtest_script.py
+    <span class="k">masserase</span>: <span class="k">true</span>
+    <span class="k">halt_reset</span>: <span class="k">false</span>
+    <span class="k">open_terminal</span>: <span class="k">true</span>
+
+  - <span class="k">nickname</span>: <span class="s">"rx"</span>
+    <span class="k">board</span>: <span class="s">"2705A"</span>
+    <span class="k">connection</span>:                 <span class="c"># empty = auto-detect USB</span>
+    <span class="k">s37_files</span>:
+      - rail_soc_railtest_2705A.s37
+    <span class="k">script</span>: railtest_script.py
+    <span class="k">masserase</span>: <span class="k">true</span>
+    <span class="k">open_terminal</span>: <span class="k">false</span></pre></div>
+
+<h3>Field Reference</h3>
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>script (root)</td><td>string</td><td>Optional global script filename. Empty or omit to disable.</td></tr>
+    <tr><td>nickname</td><td>string</td><td>Board ID for scenario.board() calls. Falls back to SDM nickname.</td></tr>
+    <tr><td>board</td><td>string</td><td>Board type for USB auto-matching (e.g. 4162A). BRD prefix optional.</td></tr>
+    <tr><td>connection</td><td>string</td><td>IP for Ethernet. Empty or "usb" for auto-detected USB.</td></tr>
+    <tr><td>s37_files</td><td>list</td><td>.s37 files to flash, relative to the scenario directory.</td></tr>
+    <tr><td>masserase</td><td>bool</td><td>Full chip erase before flash. Default: true.</td></tr>
+    <tr><td>halt_reset</td><td>bool</td><td>Hold in reset after flash. Default: false.</td></tr>
+    <tr><td>open_terminal</td><td>bool</td><td>Auto-open terminal after connect. Default: false.</td></tr>
+  </tbody>
+</table>
+
+<h3>Execution Flow</h3>
+<p>When a scenario runs, My Lab executes these phases in order:</p>
+<ol>
+  <li><strong>Flash phase</strong> — all boards are erased and flashed in parallel</li>
+  <li><strong>Connect phase</strong> — all boards are connected (VCOM + ADMIN) in parallel</li>
+  <li><strong>Script phase</strong> — if a global script exists, it runs and is responsible for launching board scripts; otherwise all board scripts run in parallel directly</li>
+</ol>
+
+<h3>Scenario Check</h3>
+<p>Always run <strong>Check</strong> before <strong>Run</strong>. The checker validates:</p>
+<ul>
+  <li>Script files exist and have valid Python syntax</li>
+  <li>All <code>.s37</code> firmware files exist in the scenario directory</li>
+  <li><code>connection</code> is a valid IP, "usb", or empty</li>
+  <li>No duplicate nicknames across boards</li>
+  <li>Board type matches an available adapter (warning only)</li>
+</ul>
+<div class="note"><strong>ℹ</strong> Warnings <span class="badge badge-orange">orange</span> allow the run to proceed. Errors <span class="badge" style="background:#fde8e8;color:#991b1b">red</span> must be resolved first.</div>
+</section>
+
+<section id="global-script">
+<h2>Global Script</h2>
+<p>Declared at root level of the YAML via <code>script:</code>. Must define a <code>script(scenario)</code> function. The global script is the <em>conductor</em> — it decides when board scripts run, can synchronise between boards at named checkpoints, and can send commands to any board directly.</p>
+
+<h3>Timing Diagram</h3>
+<p>The diagram below shows two execution patterns. The top half shows <code>run_board_scripts(wait=True)</code> — the global script blocks until all board scripts finish. The bottom half shows <code>wait=False</code> with checkpoints, allowing the global script to configure boards mid-execution.</p>
+
+<div class="figure">
+  <img src="img/timing.svg" alt="Execution timing diagram" style="background:white; padding:12px; border-radius:12px;">
+  <figcaption>Figure — Execution timing examples: global script orchestration with board scripts and checkpoints</figcaption>
+</div>
+
+<h3>Scenario API</h3>
+<table>
+  <thead><tr><th>Method</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>scenario.board(id)</td><td>Access board by index (int), serial number, or nickname. Raises ValueError if not found.</td></tr>
+    <tr><td>scenario.boards</td><td>List of all Board objects in YAML order</td></tr>
+    <tr><td>scenario.release_reset()</td><td>Reset all boards simultaneously in parallel</td></tr>
+    <tr><td>scenario.run_board_scripts(wait=True)</td><td>Run per-board scripts in parallel. wait=False returns immediately.</td></tr>
+    <tr><td>scenario.wait_board_scripts()</td><td>Block until all per-board scripts finish</td></tr>
+    <tr><td>scenario.wait_checkpoint(name, serials=None, timeout=30)</td><td>Block until boards reach checkpoint. serials=[] for subset.</td></tr>
+    <tr><td>scenario.cli_all(cmd)</td><td>Same CLI command to all boards in parallel. Returns {nickname: response}.</td></tr>
+    <tr><td>scenario.delay(seconds)</td><td>Sleep for given duration</td></tr>
+    <tr><td>scenario.print(msg)</td><td>Emit message to Run panel as [global]</td></tr>
+  </tbody>
+</table>
+
+<h3>Global Script Template</h3>
+<div class="code-block"><pre><span class="c"># global_script.py</span>
+
+<span class="k">def</span> script(scenario):
+    <span class="c"># Access boards by nickname, serial, or index</span>
+    tx = scenario.board(<span class="s">"tx"</span>)    <span class="c"># by nickname</span>
+    rx = scenario.board(1)       <span class="c"># by index (0-based)</span>
+
+    scenario.print(<span class="s">"=== Test Start ==="</span>)
+
+    <span class="c"># ── Option A: run board scripts and block until all finish ──</span>
+    scenario.run_board_scripts(wait=<span class="k">True</span>)
+    <span class="c"># global resumes here once ALL board scripts are done</span>
+    tx.cli(<span class="s">"tx 10"</span>)
+
+    <span class="c"># ── Option B: run async + checkpoint synchronisation ──</span>
+    scenario.run_board_scripts(wait=<span class="k">False</span>)
+    scenario.wait_checkpoint(<span class="s">"booted"</span>, timeout=15.0)  <span class="c"># wait for all boards</span>
+    tx.cli(<span class="s">"set_mode tx"</span>)    <span class="c"># configure while scripts still run</span>
+    rx.cli(<span class="s">"set_mode rx"</span>)
+    scenario.wait_board_scripts()
+
+    <span class="c"># ── Collect results ──</span>
+    results = scenario.cli_all(<span class="s">"get_stats"</span>)
+    <span class="k">for</span> name, resp <span class="k">in</span> results.items():
+        scenario.print(f<span class="s">"{name}: {resp}"</span>)
+
+    scenario.print(<span class="s">"=== Test Complete ==="</span>)</pre></div>
+
+<h3>Checkpoint Synchronisation</h3>
+<p>Checkpoints let board scripts signal the global script that a milestone has been reached. The global script blocks at <code>wait_checkpoint()</code> until all (or selected) boards have called <code>board.checkpoint(name)</code>.</p>
+<div class="code-block"><pre><span class="c"># In board_script.py:</span>
+board.reset()
+board.delay(1.5)
+board.checkpoint(<span class="s">"booted"</span>)         <span class="c"># signal: this board is ready</span>
+<span class="c"># board script continues independently after signalling...</span>
+board.cli(<span class="s">"run_test"</span>)
+
+<span class="c"># In global_script.py:</span>
+scenario.run_board_scripts(wait=<span class="k">False</span>)
+scenario.wait_checkpoint(<span class="s">"booted"</span>)  <span class="c"># blocks until ALL boards signal</span>
+<span class="c"># now configure both boards simultaneously</span>
+scenario.board(<span class="s">"tx"</span>).cli(<span class="s">"set_mode tx"</span>)
+scenario.board(<span class="s">"rx"</span>).cli(<span class="s">"set_mode rx"</span>)</pre></div>
+<div class="note"><strong>ℹ</strong> <code>scenario.wait_checkpoint(name, serials=["tx","rx"])</code> waits only for the listed boards by nickname or serial. The board script continues running after calling <code>checkpoint()</code> — it is not blocked.</div>
+</section>
+
+<section id="board-script">
+<h2>Board Script</h2>
+<p>Declared in the YAML via <code>script:</code> under a board entry. Must define a <code>script(board)</code> function receiving the Board object. Board scripts run in parallel across all boards — one thread per board.</p>
+
+<h3>Board API</h3>
+<table>
+  <thead><tr><th>Method</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>board.config_vcom(line_ending, echo, prompt)</td><td>Configure VCOM parameters before use</td></tr>
+    <tr><td>board.config_admin(line_ending, echo, prompt)</td><td>Configure Admin parameters before use</td></tr>
+    <tr><td>board.cli(cmd, timeout=10.0)</td><td>Send CLI command; returns cleaned response (echo + prompt stripped)</td></tr>
+    <tr><td>board.admin(cmd, timeout=10.0)</td><td>Send Admin command; returns response string</td></tr>
+    <tr><td>board.reset()</td><td>Hardware reset via Admin; waits 1s for boot</td></tr>
+    <tr><td>board.button(pb, duration=0.1)</td><td>Press push button pb (0 or 1) for given duration</td></tr>
+    <tr><td>board.delay(seconds)</td><td>Sleep for given duration</td></tr>
+    <tr><td>board.print(msg)</td><td>Emit message to Run panel as [board:nickname]</td></tr>
+    <tr><td>board.checkpoint(name)</td><td>Signal named sync point to the global script (non-blocking)</td></tr>
+    <tr><td>board.serial</td><td>Serial number string (read-only)</td></tr>
+    <tr><td>board.nickname</td><td>Nickname from YAML or SDM (read-only)</td></tr>
+  </tbody>
+</table>
+
+<h3>Real-World Example — IEEE 802.15.4 TX Test</h3>
+<div class="code-block"><pre><span class="k">import</span> time
+<span class="k">from</span> random <span class="k">import</span> randint
+
+<span class="k">def</span> script(board):
+    board.config_vcom(line_ending=<span class="s">"CRLF"</span>, echo=<span class="k">True</span>, prompt=<span class="s">">"</span>)
+
+    board.reset()
+    board.delay(1.5)  <span class="c"># wait for board to fully boot</span>
+
+    <span class="c"># --- IEEE 802.15.4 2.4 GHz Init ---</span>
+    board.print(<span class="s">"--- init 2.4GHz 802.15.4 ---"</span>)
+    board.cli(<span class="s">"rx 0"</span>)
+    board.cli(<span class="s">"config2p4GHz802154"</span>)
+    board.cli(<span class="s">"enable802154 rx 100 192 1000"</span>)
+    board.cli(<span class="s">"configTxOptions 1"</span>)
+
+    <span class="c"># --- Set TX Payload (26-byte 802.15.4 frame) ---</span>
+    board.print(<span class="s">"--- load payload ---"</span>)
+    board.cli(<span class="s">"setTxLength 26"</span>)
+    board.cli(<span class="s">"setTxPayload 0 0x1b 0x61 0x98 0x00 0x34 0x12 0x44 0x33 0x55 0x44"</span>)
+    board.cli(<span class="s">"setTxPayload 10 0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09"</span>)
+    board.cli(<span class="s">"setTxPayload 20 0x0a 0x0b 0x0c 0x0d 0x0e 0x0f"</span>)
+
+    <span class="c"># --- Transmit via CLI ---</span>
+    board.print(<span class="s">"--- send 1 packet using CLI ---"</span>)
+    board.cli(<span class="s">"tx 1"</span>)
+
+    <span class="c"># --- Transmit via button press ---</span>
+    board.print(<span class="s">"--- send 1 packet using button ---"</span>)
+    board.button(0, 0.3)</pre></div>
+
+<h3>Working with Responses</h3>
+<p>Board scripts are standard Python — the full Python standard library is available. Board CLI responses use the format <code>{{key:value}}</code> and can be processed with any Python technique:</p>
+
+<div class="code-block"><pre><span class="k">import</span> re
+
+<span class="c"># ── Using re.search — extract a single value ──</span>
+resp = board.cli(<span class="s">"getchannel"</span>)
+match = re.search(r<span class="s">"channel:(\d+)"</span>, resp)
+channel = <span class="k">int</span>(match.group(1)) <span class="k">if</span> match <span class="k">else</span> <span class="k">None</span>
+board.print(f<span class="s">"Channel: {channel}"</span>)
+
+<span class="c"># ── Using re.findall — parse all key:value pairs into a dict ──</span>
+resp = board.cli(<span class="s">"get_stats"</span>)
+pairs = re.findall(r<span class="s">"\{([^{}]+)\}"</span>, resp)
+data = <span class="k">dict</span>(p.split(<span class="s">":"</span>, 1) <span class="k">for</span> p <span class="k">in</span> pairs <span class="k">if</span> <span class="s">":"</span> <span class="k">in</span> p)
+board.print(f<span class="s">"Transmitted: {data.get('transmitted', '?')}"</span>)
+board.print(f<span class="s">"Failed: {data.get('failed', '?')}"</span>)
+
+<span class="c"># ── Any Python logic is valid — loops, conditions, assertions ──</span>
+<span class="k">for</span> channel <span class="k">in</span> [11, 15, 20, 25]:
+    board.cli(f<span class="s">"setchannel {channel}"</span>)
+    resp = board.cli(<span class="s">"tx 10"</span>)
+    board.print(f<span class="s">"ch{channel}: {resp.strip()}"</span>)
+
+<span class="c"># ── Import standard library modules as needed ──</span>
+<span class="k">import</span> time, json
+<span class="k">from</span> random <span class="k">import</span> randint
+
+<span class="c"># ── Use assertions to fail the script on unexpected results ──</span>
+resp = board.cli(<span class="s">"getchannel"</span>)
+<span class="k">assert</span> <span class="s">"channel:11"</span> <span class="k">in</span> resp, f<span class="s">"Unexpected channel: {resp}"</span></pre></div>
+<div class="note"><strong>ℹ</strong> <code>board.cli()</code> automatically strips the command echo and trailing prompt. Since scripts are pure Python, you can use any standard library: <code>re</code>, <code>json</code>, <code>time</code>, <code>math</code>, <code>csv</code>, etc. Any unhandled exception marks the board as <span class="badge" style="background:#fde8e8;color:#991b1b">error</span> in the Run panel.</div>
+
+<div class="figure">
+  <img src="img/img_output.png" alt="Run output">
+  <figcaption>Figure 8 — Run output: [global] and [board:name] timestamped log from board.print() and scenario.print()</figcaption>
+</div>
+</section>
+
+</main>
+
+</div>
+
+<!-- Active nav highlight on scroll -->
+<script>
+const sections = document.querySelectorAll('section[id], h2[id], h3[id]');
+const links    = document.querySelectorAll('.sidebar nav a');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.sidebar nav a[href="#${e.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-10% 0px -80% 0px' });
+sections.forEach(s => observer.observe(s));
+</script>
+
+</body>
+</html>

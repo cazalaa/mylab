@@ -1,0 +1,147 @@
+<svg viewBox="0 0 820 380" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <!-- Background -->
+  <rect width="820" height="380" fill="#f4f6fb" rx="12"/>
+
+  <!-- Title -->
+  <text x="410" y="30" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2630" font-family="Inter, sans-serif">Execution Timing Examples</text>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- SECTION 1: wait=True -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <text x="60" y="58" font-size="10" fill="#8899aa" font-family="Inter,sans-serif">run_board_scripts(wait=True)</text>
+
+  <!-- Lane backgrounds -->
+  <rect x="60" y="65" width="700" height="30" rx="5" fill="#e8f0fb" opacity="0.7"/>
+  <rect x="60" y="103" width="700" height="30" rx="5" fill="#d1fae5" opacity="0.5"/>
+  <rect x="60" y="141" width="700" height="30" rx="5" fill="#fed7aa" opacity="0.4"/>
+
+  <!-- Lane labels -->
+  <text x="52" y="85" text-anchor="end" font-size="11" fill="#185FA5" font-weight="600" font-family="Inter,sans-serif">global</text>
+  <text x="52" y="123" text-anchor="end" font-size="11" fill="#1D9E75" font-weight="600" font-family="Inter,sans-serif">board 0</text>
+  <text x="52" y="161" text-anchor="end" font-size="11" fill="#EF9F27" font-weight="600" font-family="Inter,sans-serif">board 1</text>
+
+  <!-- Global: pre-setup -->
+  <rect x="62" y="68" width="80" height="24" rx="4" fill="#185FA5"/>
+  <text x="102" y="84" text-anchor="middle" font-size="9" fill="white">setup</text>
+
+  <!-- Global: blocked waiting -->
+  <rect x="145" y="68" width="310" height="24" rx="4" fill="#7eb8d4" opacity="0.55"/>
+  <text x="300" y="84" text-anchor="middle" font-size="9" fill="#0d3d6e">waiting for all board scripts…</text>
+
+  <!-- Global: post -->
+  <rect x="458" y="68" width="140" height="24" rx="4" fill="#185FA5"/>
+  <text x="528" y="84" text-anchor="middle" font-size="9" fill="white">post-script actions</text>
+
+  <rect x="602" y="68" width="60" height="24" rx="4" fill="#0d3d6e"/>
+  <text x="632" y="84" text-anchor="middle" font-size="9" fill="white">done</text>
+
+  <!-- Board 0 script -->
+  <rect x="145" y="106" width="290" height="24" rx="4" fill="#1D9E75"/>
+  <text x="290" y="122" text-anchor="middle" font-size="9" fill="white">board 0 script execution</text>
+
+  <!-- Board 1 script (longer) -->
+  <rect x="145" y="144" width="308" height="24" rx="4" fill="#EF9F27"/>
+  <text x="299" y="160" text-anchor="middle" font-size="9" fill="white">board 1 script execution</text>
+
+  <!-- Sync lines -->
+  <line x1="145" y1="62" x2="145" y2="172" stroke="#185FA5" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="148" y="180" font-size="8.5" fill="#185FA5">start</text>
+
+  <line x1="456" y1="62" x2="456" y2="172" stroke="#1D9E75" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="430" y="180" font-size="8.5" fill="#1D9E75">all done</text>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- Divider -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <line x1="60" y1="197" x2="760" y2="197" stroke="#d8dde5" stroke-width="1" stroke-dasharray="5,4"/>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2: wait=False + checkpoints -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <text x="60" y="218" font-size="10" fill="#8899aa" font-family="Inter,sans-serif">run_board_scripts(wait=False)  +  checkpoints</text>
+
+  <!-- Lane backgrounds -->
+  <rect x="60" y="225" width="700" height="30" rx="5" fill="#e8f0fb" opacity="0.7"/>
+  <rect x="60" y="263" width="700" height="30" rx="5" fill="#d1fae5" opacity="0.5"/>
+  <rect x="60" y="301" width="700" height="30" rx="5" fill="#fed7aa" opacity="0.4"/>
+
+  <!-- Lane labels -->
+  <text x="52" y="245" text-anchor="end" font-size="11" fill="#185FA5" font-weight="600" font-family="Inter,sans-serif">global</text>
+  <text x="52" y="283" text-anchor="end" font-size="11" fill="#1D9E75" font-weight="600" font-family="Inter,sans-serif">board 0</text>
+  <text x="52" y="321" text-anchor="end" font-size="11" fill="#EF9F27" font-weight="600" font-family="Inter,sans-serif">board 1</text>
+
+  <!-- Global: setup -->
+  <rect x="62" y="228" width="80" height="24" rx="4" fill="#185FA5"/>
+  <text x="102" y="244" text-anchor="middle" font-size="9" fill="white">setup</text>
+
+  <!-- Global: wait_checkpoint -->
+  <rect x="145" y="228" width="160" height="24" rx="4" fill="#7eb8d4" opacity="0.55"/>
+  <text x="225" y="244" text-anchor="middle" font-size="9" fill="#0d3d6e">wait_checkpoint()</text>
+
+  <!-- Global: configure boards (runs while board scripts still going) -->
+  <rect x="308" y="228" width="130" height="24" rx="4" fill="#185FA5"/>
+  <text x="373" y="244" text-anchor="middle" font-size="9" fill="white">configure boards</text>
+
+  <!-- Global: wait_board_scripts -->
+  <rect x="441" y="228" width="110" height="24" rx="4" fill="#7eb8d4" opacity="0.55"/>
+  <text x="496" y="244" text-anchor="middle" font-size="9" fill="#0d3d6e">wait_board_scripts()</text>
+
+  <!-- Global: collect -->
+  <rect x="554" y="228" width="100" height="24" rx="4" fill="#185FA5"/>
+  <text x="604" y="244" text-anchor="middle" font-size="9" fill="white">collect / done</text>
+
+  <!-- Board 0: phase 1 -->
+  <rect x="145" y="266" width="130" height="24" rx="4" fill="#1D9E75"/>
+  <text x="210" y="282" text-anchor="middle" font-size="9" fill="white">board 0 script</text>
+
+  <!-- Board 0: checkpoint signal -->
+  <rect x="278" y="266" width="28" height="24" rx="4" fill="#98d4a0"/>
+  <text x="292" y="282" text-anchor="middle" font-size="8" fill="#065f46">ckpt</text>
+
+  <!-- Board 0: continues -->
+  <rect x="308" y="266" width="240" height="24" rx="4" fill="#1D9E75" opacity="0.6"/>
+  <text x="428" y="282" text-anchor="middle" font-size="9" fill="white">board 0 script (cont.)</text>
+
+  <rect x="551" y="266" width="28" height="24" rx="4" fill="#1D9E75"/>
+  <text x="565" y="282" text-anchor="middle" font-size="8.5" fill="white">end</text>
+
+  <!-- Board 1: phase 1 (slightly longer) -->
+  <rect x="145" y="304" width="150" height="24" rx="4" fill="#EF9F27"/>
+  <text x="220" y="320" text-anchor="middle" font-size="9" fill="white">board 1 script</text>
+
+  <!-- Board 1: checkpoint -->
+  <rect x="298" y="304" width="28" height="24" rx="4" fill="#fcd7a0"/>
+  <text x="312" y="320" text-anchor="middle" font-size="8" fill="#92400e">ckpt</text>
+
+  <!-- Board 1: continues -->
+  <rect x="328" y="304" width="220" height="24" rx="4" fill="#EF9F27" opacity="0.6"/>
+  <text x="438" y="320" text-anchor="middle" font-size="9" fill="white">board 1 script (cont.)</text>
+
+  <rect x="551" y="304" width="28" height="24" rx="4" fill="#EF9F27"/>
+  <text x="565" y="320" text-anchor="middle" font-size="8.5" fill="white">end</text>
+
+  <!-- Sync lines section 2 -->
+  <!-- start -->
+  <line x1="145" y1="222" x2="145" y2="332" stroke="#185FA5" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="148" y="340" font-size="8.5" fill="#185FA5">start</text>
+
+  <!-- checkpoint line (both boards reach ~x=308) -->
+  <line x1="308" y1="222" x2="308" y2="332" stroke="#1D9E75" stroke-width="1.5" stroke-dasharray="3,3"/>
+  <text x="268" y="340" font-size="8.5" fill="#1D9E75">checkpoint</text>
+
+  <!-- wait_board_scripts sync (all done ~x=551) -->
+  <line x1="551" y1="222" x2="551" y2="332" stroke="#185FA5" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="525" y="340" font-size="8.5" fill="#185FA5">all done</text>
+
+  <!-- ── Legend ── -->
+  <rect x="62" y="358" width="10" height="8" rx="2" fill="#185FA5"/>
+  <text x="76" y="366" font-size="9" fill="#4a5a68" font-family="Inter,sans-serif">global running</text>
+  <rect x="162" y="358" width="10" height="8" rx="2" fill="#7eb8d4" opacity="0.8"/>
+  <text x="176" y="366" font-size="9" fill="#4a5a68" font-family="Inter,sans-serif">global waiting</text>
+  <rect x="272" y="358" width="10" height="8" rx="2" fill="#1D9E75"/>
+  <text x="286" y="366" font-size="9" fill="#4a5a68" font-family="Inter,sans-serif">board 0 script</text>
+  <rect x="372" y="358" width="10" height="8" rx="2" fill="#EF9F27"/>
+  <text x="386" y="366" font-size="9" fill="#4a5a68" font-family="Inter,sans-serif">board 1 script</text>
+  <rect x="462" y="358" width="10" height="8" rx="2" fill="#98d4a0"/>
+  <text x="476" y="366" font-size="9" fill="#4a5a68" font-family="Inter,sans-serif">checkpoint signal</text>
+</svg>
