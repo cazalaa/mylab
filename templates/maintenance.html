@@ -410,7 +410,10 @@ async function saveGroup() {
         .map(a => ({
             serialNumber:     a.serialNumber,
             connectivityType: a.connectivityType,
-            ...(a.connectivityType !== "usb" && a.host ? { host: a.host } : {})
+            ...(a.connectivityType !== "usb" && a.host ? { host: a.host } : {}),
+            ...(a.nickname   ? { nickname:   a.nickname   } : {}),
+            ...(a.boardId    ? { boardId:    a.boardId    } : {}),
+            ...(a.boardLabel ? { boardLabel: a.boardLabel } : {}),
         }));
 
     await fetch(`/groups/${encodeURIComponent(name)}`, {

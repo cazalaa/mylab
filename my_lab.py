@@ -29,7 +29,7 @@ SCENARI_DIR = os.path.join(_BASE_DIR, "scenari")
 os.makedirs(GROUPS_DIR, exist_ok=True)
 
 # Dimensions
-WIN_W          = 900
+WIN_W          = 800
 WIN_COLLAPSED  = 65   # hauteur barre compacte
 WIN_EXPANDED   = 700   # hauteur dépliée
 
@@ -668,6 +668,21 @@ def scenario_mkdir():
         return jsonify({"error": "invalid path"}), 400
     os.makedirs(full, exist_ok=True)
     return jsonify({"ok": True})
+
+@app.route("/api/scenario-update", methods=["POST"])
+def scenario_update():
+    """Overwrite an existing scenario file with new content."""
+    base    = request.json.get("base", SCENARI_DIR)
+    path    = request.json.get("path", "").strip()
+    content = request.json.get("content", "")
+    base    = os.path.abspath(base)
+    full    = os.path.abspath(os.path.join(base, path))
+    if not full.startswith(base) or not full.endswith(".yaml"):
+        return jsonify({"error": "invalid path"}), 400
+    with open(full, "w") as f:
+        f.write(content)
+    return jsonify({"ok": True})
+
 
 @app.route("/api/scenario-save", methods=["POST"])
 def scenario_save():

@@ -171,6 +171,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    min-height: 0;
     box-shadow:
         -6px -6px 12px rgba(250, 251, 255, 1),
          6px  6px 12px rgba(22, 27, 29, 0.23);
@@ -535,6 +536,80 @@ pre.sc-yaml-content mark.sc-line-error {
 .sc-log-indent { display: inline-block; width: 82px; }
 
 
+/* ── Structured sections view ── */
+.sc-sections { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+
+.sc-section {
+    background: #EFF2F9;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow:
+        -3px -3px 6px rgba(250,251,255,1),
+         3px  3px 6px rgba(22,27,29,0.18);
+}
+.sc-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s;
+}
+.sc-section-header:hover { background: rgba(22,27,29,0.03); }
+.sc-section-arrow { font-size: 10px; color: #8899aa; flex-shrink: 0; width: 10px; }
+.sc-section-icon  { font-size: 13px; flex-shrink: 0; }
+.sc-section-title { font-size: 12px; font-weight: 500; color: #4a5a68; flex-shrink: 0; }
+.sc-section-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; color: #185FA5;
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-left: 4px;
+}
+.sc-section-del {
+    font-size: 11px; color: #b5bfc6; cursor: pointer;
+    padding: 2px 4px; border-radius: 4px; flex-shrink: 0;
+    transition: color .15s;
+}
+.sc-section-del:hover { color: #E24B4A; }
+
+.sc-section-body {
+    border-top: 1px solid rgba(22,27,29,0.07);
+    padding: 12px 14px;
+}
+.sc-section-form { display: flex; flex-direction: column; gap: 8px; }
+.sc-sf-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc-sf-label {
+    font-size: 10px; font-weight: 500; color: #8899aa;
+    text-transform: uppercase; letter-spacing: .05em;
+    width: 72px; flex-shrink: 0;
+}
+.sc-sf-input {
+    flex: 1; height: 28px; padding: 0 10px;
+    border-radius: 8px; border: none;
+    background: #EFF2F9; color: #4a5a68; font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    box-shadow:
+        inset -2px -2px 4px rgba(250,251,255,1),
+        inset  2px  2px 4px rgba(22,27,29,0.15);
+    outline: none;
+}
+.sc-sf-input-group { display: flex; gap: 6px; flex: 1; }
+.sc-sf-check {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: #6E7F8D; cursor: pointer;
+}
+.sc-sf-s37-wrap { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.sc-sf-hint { font-size: 10px; color: #b5bfc6; padding-left: 80px; }
+.sc-section-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+.sc-raw-toggle-btn {
+    font-size: 10px; color: #b5bfc6; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    user-select: none;
+}
+.sc-raw-toggle-btn:hover { color: #8899aa; }
+
 .sc-board-form {
     background: #EFF2F9;
     border-radius: 16px;
@@ -677,20 +752,29 @@ function activateMode(mode) {
     document.getElementById("scRightTitle").innerText       = mode === "load" ? "Content" : "New Scenario";
     document.getElementById("scSelectedDir").style.display  = mode === "create" ? "" : "none";
 
+    document.getElementById("scYamlEditor").style.display = "none";
+    document.getElementById("scCheckBtn").disabled = mode === "load";
+    document.getElementById("scRunBtn").disabled   = true;
+
     if (mode === "load") {
-        document.getElementById("scYamlView").style.display   = "";
-        document.getElementById("scYamlEditor").style.display = "none";
-        if (document.getElementById("scEditorHint"))
-            document.getElementById("scEditorHint").style.display = "none";
+        document.getElementById("scYamlView").style.display = "";
         document.getElementById("scCheckBtn").disabled = true;
-        document.getElementById("scRunBtn").disabled   = true;
     } else {
-        document.getElementById("scYamlView").style.display   = "none";
-        document.getElementById("scYamlEditor").style.display = "";
-        document.getElementById("scYamlEditor").value         = YAML_TEMPLATE;
-        document.getElementById("scYamlEditor").title         = "Edit YAML directly or use + Board to add entries";
+        // Create mode: init sections with blank template
+        document.getElementById("scYamlView").style.display = "";
         scSelectedDir = null;
-        document.getElementById("scSelectedDirName").innerText = "\u2014 none selected \u2014";
+        document.getElementById("scSelectedDirName").innerText = "— none selected —";
+        parsedScenario = {
+            script: null,
+            boards: [{
+                nickname: "", board: "", connection: "",
+                s37_files: [], script: "",
+                masserase: true, halt_reset: false, open_terminal: false
+            }]
+        };
+        expandedSection = null;
+        buildCreateSectionsDOM();
+        document.getElementById("scCheckBtn").disabled = false;
     }
     loadScenarios();
 }
@@ -861,21 +945,47 @@ function closeGroupPicker() {
 function populateFromGroup(gdata) {
     const adapters = gdata.adapters || [];
     if (adapters.length === 0) return;
-    const boards = adapters.map(a => {
-        const isIP = a.connectivityType !== "usb";
-        return [
-            "  - board: ",
-            "    jlink_name_or_ip: " + (isIP && a.host ? a.host : ""),
-            "    masserase: true",
-            "    halt_reset: true",
-            "    open_terminal: true",
-            "    s37_files:",
-            "      - .s37",
-            '    script: ""',
-        ].join("\n");
-    }).join("\n");
-    document.getElementById("scYamlEditor").value = "boards:\n" + boards + "\n";
-    document.getElementById("scCheckBtn").disabled = false;
+
+    if (scMode === "create") {
+        // Add boards from group into parsedScenario sections
+        if (!parsedScenario) parsedScenario = { boards: [] };
+        if (!parsedScenario.boards) parsedScenario.boards = [];
+        adapters.forEach(a => {
+            const isIP = a.connectivityType !== "usb";
+            // Strip BRD prefix from boardId (e.g. BRD4162A → 4162A)
+            const boardShort = a.boardId ? a.boardId.replace(/^BRD/i, "") : "";
+            parsedScenario.boards.push({
+                nickname:      a.nickname   || "",
+                board:         boardShort,
+                connection:    isIP && a.host ? a.host : "",
+                s37_files:     [],
+                script:        "",
+                masserase:     true,
+                halt_reset:    false,
+                open_terminal: false
+            });
+        });
+        buildCreateSectionsDOM();
+        sfSyncToEditor();
+    } else {
+        // Legacy: write YAML to editor
+        const boards = adapters.map(a => {
+            const isIP = a.connectivityType !== "usb";
+            return [
+                "  - board: ",
+                "    jlink_name_or_ip: " + (isIP && a.host ? a.host : ""),
+                "    masserase: true",
+                "    halt_reset: true",
+                "    open_terminal: true",
+                "    s37_files:",
+                "      - .s37",
+                '    script: ""',
+            ].join("\n");
+        }).join("\n");
+        document.getElementById("scYamlEditor").value = "boards:\n" + boards + "\n";
+        document.getElementById("scCheckBtn").disabled = false;
+    }
+    closeGroupPicker();
 }
 
 async function saveScenario() {
@@ -908,6 +1018,7 @@ async function onScCheck() {
 
     let body;
     if (scMode === "create") {
+        sfSyncToEditor();
         const content = document.getElementById("scYamlEditor").value;
         body = { base: scenariBaseDir, dir: scSelectedDir || "", content };
     } else {
@@ -1173,12 +1284,32 @@ function renderYaml(text, issueLines = new Set()) {
         const lineNum  = idx + 1;
         const hasIssue = issueLines.has(lineNum);
         const rendered = highlightLine(line);
-        if (hasIssue) {
-            return `<mark class="sc-line-error">${rendered}</mark>`;
-        }
+        if (hasIssue) return `<mark class="sc-line-error">${rendered}</mark>`;
         return rendered;
     });
-    wrap.innerHTML = `<pre class="sc-yaml-content">${html.join("\n")}</pre>`;
+    const rawHtml = `<pre class="sc-yaml-content">${html.join("\n")}</pre>`;
+
+    // In load mode: show sections view, raw YAML hidden by default
+    if (scMode === "load") {
+        wrap.innerHTML = `
+            <div id="sc-sections-container"></div>
+            <div id="sc-raw-toggle" style="padding:6px 10px; text-align:right;">
+                <span class="sc-raw-toggle-btn" onclick="toggleRawYaml()">▾ Show YAML</span>
+            </div>
+            <div id="sc-raw-yaml" style="display:none">${rawHtml}</div>`;
+        renderSections(text);
+    } else {
+        wrap.innerHTML = rawHtml;
+    }
+}
+
+function toggleRawYaml() {
+    const raw = document.getElementById("sc-raw-yaml");
+    const btn = document.querySelector(".sc-raw-toggle-btn");
+    if (!raw) return;
+    const visible = raw.style.display !== "none";
+    raw.style.display = visible ? "none" : "";
+    if (btn) btn.innerText = visible ? "▾ Show YAML" : "▴ Hide YAML";
 }
 
 function highlightLine(line) {
@@ -1222,6 +1353,23 @@ document.addEventListener("click", e => {
 let bfS37Files = [];
 
 function openBoardForm() {
+    if (scMode === "create") {
+        // In create mode: add a blank board to the sections view
+        if (!parsedScenario) parsedScenario = { boards: [] };
+        if (!parsedScenario.boards) parsedScenario.boards = [];
+        parsedScenario.boards.push({
+            nickname: "", board: "", connection: "",
+            s37_files: [], script: "",
+            masserase: true, halt_reset: false, open_terminal: false
+        });
+        buildCreateSectionsDOM();
+        // Auto-expand the new board
+        const newIdx = parsedScenario.boards.length - 1;
+        toggleSection(`board:${newIdx}`);
+        sfSyncToEditor();
+        return;
+    }
+    // Load mode: original popup
     bfS37Files = [];
     document.getElementById("bfBoard").value   = "";
     document.getElementById("bfJlink").value   = "";
@@ -1362,9 +1510,411 @@ function appendBoard() {
     closeBoardForm();
 }
 
-// Close overlay on background click
-document.getElementById("boardFormOverlay").addEventListener("click", e => {
-    if (e.target === document.getElementById("boardFormOverlay")) closeBoardForm();
-});
+// Build sections DOM for CREATE mode (same structure, different save)
+function buildCreateSectionsDOM() {
+    const wrap = document.getElementById("scYamlView");
+    if (!wrap) return;
+    const sc = parsedScenario || { script: null, boards: [] };
+    const boards = sc.boards || [];
+    const gScript = (sc.script || "").toString().replace(/^null$/i, "").trim();
 
-</script>
+    let html = '<div class="sc-sections">';
+
+    // Global script
+    html += `
+    <div class="sc-section" id="sc-sec-global">
+        <div class="sc-section-header" onclick="toggleSection('global')">
+            <span class="sc-section-arrow" id="sc-arr-global">▶</span>
+            <span class="sc-section-icon">⚙</span>
+            <span class="sc-section-title">Global Script</span>
+            <span class="sc-section-badge">${gScript ? esc(gScript) : '<span style="color:#b5bfc6">none</span>'}</span>
+        </div>
+        <div class="sc-section-body" id="sc-body-global" style="display:none">
+            <div class="sc-section-form">
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Script</label>
+                    <div class="sc-sf-input-group">
+                        <input class="sc-sf-input" id="sf-global-script" value="${esc(gScript)}" placeholder="global_script.py">
+                        <button class="sc-browse-btn" onclick="sfBrowseGlobalScript()">📁</button>
+                    </div>
+                </div>
+                <div class="sc-sf-row sc-sf-hint">File will be copied to the scenario directory if needed.</div>
+                <div class="sc-section-actions">
+                    <button class="sc-browse-btn" onclick="sfCreateUpdateGlobal()">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+
+    boards.forEach((b, i) => {
+        const nick   = b.nickname  || "";
+        const board  = b.board    || "";
+        const conn   = (b.connection !== undefined ? b.connection : b.jlink_name_or_ip) || "";
+        const script = b.script   || "";
+        const badge  = [nick, board, conn].filter(Boolean).join("  ·  ");
+        const masserase = b.masserase !== false;
+        const haltReset = b.halt_reset  === true;
+        const openTerm  = b.open_terminal === true;
+
+        html += `
+    <div class="sc-section" id="sc-sec-board-${i}">
+        <div class="sc-section-header" onclick="toggleSection('board:${i}')">
+            <span class="sc-section-arrow" id="sc-arr-board-${i}">▶</span>
+            <span class="sc-section-icon">🔲</span>
+            <span class="sc-section-title">Board ${i}</span>
+            <span class="sc-section-badge">${esc(badge) || '<span style="color:#b5bfc6">unnamed</span>'}</span>
+            <span class="sc-section-del" title="Remove" onclick="sfCreateRemoveBoard(event,${i})">✕</span>
+        </div>
+        <div class="sc-section-body" id="sc-body-board-${i}" style="display:none">
+            <div class="sc-section-form">
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Nickname</label>
+                    <input class="sc-sf-input" id="sf-nick-${i}" value="${esc(nick)}" placeholder="e.g. tx">
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Board</label>
+                    <input class="sc-sf-input" id="sf-board-${i}" value="${esc(board)}" placeholder="e.g. 4162A">
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Connection</label>
+                    <input class="sc-sf-input" id="sf-conn-${i}" value="${esc(conn)}" placeholder="IP or empty for USB">
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">S37 files</label>
+                    <div class="sc-sf-s37-wrap" id="sf-s37-wrap-${i}"></div>
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label"></label>
+                    <button class="sc-browse-btn" onclick="sfAddS37(${i})">+ Add S37</button>
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Script</label>
+                    <div class="sc-sf-input-group">
+                        <input class="sc-sf-input" id="sf-script-${i}" value="${esc(script)}" placeholder="board_script.py">
+                        <button class="sc-browse-btn" onclick="sfBrowseScript(${i})">📁</button>
+                    </div>
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Options</label>
+                    <label class="sc-sf-check"><input type="checkbox" id="sf-masserase-${i}" ${masserase?"checked":""}> Mass erase</label>
+                    <label class="sc-sf-check"><input type="checkbox" id="sf-halt-${i}" ${haltReset?"checked":""}> Halt reset</label>
+                    <label class="sc-sf-check"><input type="checkbox" id="sf-term-${i}" ${openTerm?"checked":""}> Terminal</label>
+                </div>
+                <div class="sc-section-actions">
+                    <button class="sc-browse-btn" onclick="sfCreateUpdateBoard(${i})">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+    });
+
+    html += '</div>';
+    wrap.innerHTML = html;
+    boards.forEach((b, i) => sfRenderS37(i, b.s37_files || []));
+}
+
+// Create mode: collect form fields into parsedScenario without saving to disk
+function sfCreateUpdateGlobal() {
+    const script = document.getElementById("sf-global-script").value.trim();
+    parsedScenario.script = script || null;
+    if (!script) delete parsedScenario.script;
+    buildCreateSectionsDOM();
+    toggleSection("global");
+    sfSyncToEditor();
+}
+
+function sfCreateUpdateBoard(boardIdx) {
+    const b = parsedScenario.boards[boardIdx];
+    b.nickname      = document.getElementById(`sf-nick-${boardIdx}`).value.trim()   || undefined;
+    b.board         = document.getElementById(`sf-board-${boardIdx}`).value.trim()  || undefined;
+    b.connection    = document.getElementById(`sf-conn-${boardIdx}`).value.trim()   || undefined;
+    b.script        = document.getElementById(`sf-script-${boardIdx}`).value.trim() || undefined;
+    b.masserase     = document.getElementById(`sf-masserase-${boardIdx}`).checked;
+    b.halt_reset    = document.getElementById(`sf-halt-${boardIdx}`).checked;
+    b.open_terminal = document.getElementById(`sf-term-${boardIdx}`).checked;
+    Object.keys(b).forEach(k => { if (b[k] === undefined) delete b[k]; });
+    buildCreateSectionsDOM();
+    toggleSection(`board:${boardIdx}`);
+    sfSyncToEditor();
+}
+
+function sfCreateRemoveBoard(event, boardIdx) {
+    event.stopPropagation();
+    if (parsedScenario.boards.length <= 1) { alert("A scenario needs at least one board."); return; }
+    const nick = parsedScenario.boards[boardIdx].nickname || `Board ${boardIdx}`;
+    if (!confirm(`Remove ${nick}?`)) return;
+    parsedScenario.boards.splice(boardIdx, 1);
+    buildCreateSectionsDOM();
+    sfSyncToEditor();
+}
+
+// Sync parsedScenario to the hidden textarea so saveScenario() can use it
+function sfSyncToEditor() {
+    if (!window.jsyaml) return;
+    const yaml = window.jsyaml.dump(parsedScenario, { lineWidth: -1 });
+    document.getElementById("scYamlEditor").value = yaml;
+    document.getElementById("scCheckBtn").disabled = !yaml.trim();
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+let parsedScenario = null;
+let expandedSection = null;
+
+function renderSections(yamlText) {
+    parsedScenario = null;
+    try { parsedScenario = window.jsyaml ? window.jsyaml.load(yamlText) : null; } catch(e) {}
+    if (!parsedScenario) {
+        const c = document.getElementById("sc-sections-container");
+        if (c) c.innerHTML = '<div class="sc-hint" style="color:#E24B4A">Could not parse YAML</div>';
+        return;
+    }
+    expandedSection = null;
+    buildSectionsDOM();
+}
+
+function buildSectionsDOM() {
+    const container = document.getElementById("sc-sections-container");
+    if (!container) return;
+    const sc = parsedScenario || {};
+    const boards = sc.boards || [];
+
+    const gScript = (sc.script || "").toString().trim();
+    let html = '<div class="sc-sections">';
+
+    // Global script section
+    html += `
+    <div class="sc-section" id="sc-sec-global">
+        <div class="sc-section-header" onclick="toggleSection('global')">
+            <span class="sc-section-arrow" id="sc-arr-global">▶</span>
+            <span class="sc-section-icon">⚙</span>
+            <span class="sc-section-title">Global Script</span>
+            <span class="sc-section-badge">${gScript ? esc(gScript) : '<span style="color:#b5bfc6">none</span>'}</span>
+        </div>
+        <div class="sc-section-body" id="sc-body-global" style="display:none">
+            <div class="sc-section-form">
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Script</label>
+                    <div class="sc-sf-input-group">
+                        <input class="sc-sf-input" id="sf-global-script" value="${esc(gScript)}" placeholder="global_script.py">
+                        <button class="sc-browse-btn" onclick="sfBrowseGlobalScript()">📁</button>
+                    </div>
+                </div>
+                <div class="sc-sf-row sc-sf-hint">File will be copied to the scenario directory if needed.</div>
+                <div class="sc-section-actions">
+                    <button class="sc-browse-btn" onclick="sfUpdateGlobal()">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+
+    // Board sections
+    boards.forEach((b, i) => {
+        const nick   = b.nickname || "";
+        const board  = b.board   || "";
+        const conn   = (b.connection !== undefined ? b.connection : b.jlink_name_or_ip) || "";
+        const badge  = [nick, board, conn].filter(Boolean).join("  ·  ");
+        const script = b.script  || "";
+        const masserase   = b.masserase !== false;
+        const haltReset   = b.halt_reset  === true;
+        const openTerm    = b.open_terminal === true;
+
+        html += `
+    <div class="sc-section" id="sc-sec-board-${i}">
+        <div class="sc-section-header" onclick="toggleSection('board:${i}')">
+            <span class="sc-section-arrow" id="sc-arr-board-${i}">▶</span>
+            <span class="sc-section-icon">🔲</span>
+            <span class="sc-section-title">Board ${i}</span>
+            <span class="sc-section-badge">${esc(badge) || '<span style="color:#b5bfc6">unnamed</span>'}</span>
+            <span class="sc-section-del" title="Remove board" onclick="sfRemoveBoard(event,${i})">✕</span>
+        </div>
+        <div class="sc-section-body" id="sc-body-board-${i}" style="display:none">
+            <div class="sc-section-form">
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Nickname</label>
+                    <input class="sc-sf-input" id="sf-nick-${i}" value="${esc(nick)}" placeholder="e.g. tx">
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Board</label>
+                    <input class="sc-sf-input" id="sf-board-${i}" value="${esc(board)}" placeholder="e.g. 4162A">
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Connection</label>
+                    <input class="sc-sf-input" id="sf-conn-${i}" value="${esc(conn)}" placeholder="IP or empty for USB">
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">S37 files</label>
+                    <div class="sc-sf-s37-wrap" id="sf-s37-wrap-${i}"></div>
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label"></label>
+                    <button class="sc-browse-btn" onclick="sfAddS37(${i})">+ Add S37</button>
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Script</label>
+                    <div class="sc-sf-input-group">
+                        <input class="sc-sf-input" id="sf-script-${i}" value="${esc(script)}" placeholder="board_script.py">
+                        <button class="sc-browse-btn" onclick="sfBrowseScript(${i})">📁</button>
+                    </div>
+                </div>
+                <div class="sc-sf-row">
+                    <label class="sc-sf-label">Options</label>
+                    <label class="sc-sf-check"><input type="checkbox" id="sf-masserase-${i}" ${masserase?"checked":""}> Mass erase</label>
+                    <label class="sc-sf-check"><input type="checkbox" id="sf-halt-${i}" ${haltReset?"checked":""}> Halt reset</label>
+                    <label class="sc-sf-check"><input type="checkbox" id="sf-term-${i}" ${openTerm?"checked":""}> Terminal</label>
+                </div>
+                <div class="sc-section-actions">
+                    <button class="sc-browse-btn" onclick="sfUpdateBoard(${i})">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+    boards.forEach((b, i) => sfRenderS37(i, b.s37_files || []));
+}
+
+function toggleSection(key) {
+    const isGlobal  = key === "global";
+    const bodyId    = isGlobal ? "sc-body-global"   : `sc-body-board-${key.split(":")[1]}`;
+    const arrId     = isGlobal ? "sc-arr-global"    : `sc-arr-board-${key.split(":")[1]}`;
+    const body      = document.getElementById(bodyId);
+    const arr       = document.getElementById(arrId);
+    if (!body) return;
+    const opening   = body.style.display === "none";
+    // Close previously open section
+    if (expandedSection && expandedSection !== key) {
+        const pIsGlobal = expandedSection === "global";
+        const pBodyId   = pIsGlobal ? "sc-body-global"   : `sc-body-board-${expandedSection.split(":")[1]}`;
+        const pArrId    = pIsGlobal ? "sc-arr-global"    : `sc-arr-board-${expandedSection.split(":")[1]}`;
+        const pb = document.getElementById(pBodyId);
+        const pa = document.getElementById(pArrId);
+        if (pb) pb.style.display = "none";
+        if (pa) pa.innerText = "▶";
+    }
+    body.style.display  = opening ? "" : "none";
+    arr.innerText       = opening ? "▼" : "▶";
+    expandedSection     = opening ? key : null;
+}
+
+function sfRenderS37(boardIdx, files) {
+    const wrap = document.getElementById(`sf-s37-wrap-${boardIdx}`);
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    files.forEach((f, fi) => {
+        const item = document.createElement("div");
+        item.className = "sc-s37-item";
+        item.innerHTML = `<span>${esc(f)}</span><span class="sc-s37-remove" onclick="sfRemoveS37(${boardIdx},${fi})">✕</span>`;
+        wrap.appendChild(item);
+    });
+    if (files.length === 0)
+        wrap.innerHTML = '<span style="color:#b5bfc6;font-size:11px">No files</span>';
+}
+
+function sfRemoveS37(boardIdx, fileIdx) {
+    parsedScenario.boards[boardIdx].s37_files.splice(fileIdx, 1);
+    sfRenderS37(boardIdx, parsedScenario.boards[boardIdx].s37_files);
+}
+
+async function sfAddS37(boardIdx) {
+    const scenarioDir = activeScenario ? activeScenario.dir : (scSelectedDir || "");
+    let filePath = null;
+    if (window.pywebview)
+        filePath = await window.pywebview.api.pick_file(`${scenariBaseDir}/${scenarioDir}`, ["S37 files (*.s37)", "All files (*.*)"]);
+    else
+        filePath = prompt("S37 file path:");
+    if (!filePath) return;
+    const res  = await fetch("/api/scenario-copy-file", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ src: filePath, base: scenariBaseDir, dir: scenarioDir })
+    });
+    const data = await res.json();
+    if (!data.ok) { alert("Failed: " + data.error); return; }
+    if (!parsedScenario.boards[boardIdx].s37_files) parsedScenario.boards[boardIdx].s37_files = [];
+    parsedScenario.boards[boardIdx].s37_files.push(data.filename);
+    sfRenderS37(boardIdx, parsedScenario.boards[boardIdx].s37_files);
+}
+
+async function sfBrowseScript(boardIdx) {
+    const scenarioDir = activeScenario ? activeScenario.dir : (scSelectedDir || "");
+    let filePath = null;
+    if (window.pywebview)
+        filePath = await window.pywebview.api.pick_file(`${scenariBaseDir}/${scenarioDir}`, ["Python scripts (*.py)", "All files (*.*)"]);
+    else
+        filePath = prompt("Script file path:");
+    if (!filePath) return;
+    const res  = await fetch("/api/scenario-copy-file", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ src: filePath, base: scenariBaseDir, dir: scenarioDir })
+    });
+    const data = await res.json();
+    if (!data.ok) { alert("Failed: " + data.error); return; }
+    document.getElementById(`sf-script-${boardIdx}`).value = data.filename;
+}
+
+async function sfBrowseGlobalScript() {
+    const scenarioDir = activeScenario ? activeScenario.dir : (scSelectedDir || "");
+    let filePath = null;
+    if (window.pywebview)
+        filePath = await window.pywebview.api.pick_file(`${scenariBaseDir}/${scenarioDir}`, ["Python scripts (*.py)", "All files (*.*)"]);
+    else
+        filePath = prompt("Global script file path:");
+    if (!filePath) return;
+    const res  = await fetch("/api/scenario-copy-file", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ src: filePath, base: scenariBaseDir, dir: scenarioDir })
+    });
+    const data = await res.json();
+    if (!data.ok) { alert("Failed: " + data.error); return; }
+    document.getElementById("sf-global-script").value = data.filename;
+}
+
+async function sfUpdateGlobal() {
+    const script = document.getElementById("sf-global-script").value.trim();
+    parsedScenario.script = script || null;
+    if (!script) delete parsedScenario.script;
+    await sfSaveBack();
+    const content = window.jsyaml ? window.jsyaml.dump(parsedScenario, { lineWidth: -1 }) : "";
+    renderYaml(content);
+    toggleSection("global");
+}
+
+async function sfUpdateBoard(boardIdx) {
+    const b = parsedScenario.boards[boardIdx];
+    b.nickname      = document.getElementById(`sf-nick-${boardIdx}`).value.trim()   || undefined;
+    b.board         = document.getElementById(`sf-board-${boardIdx}`).value.trim()  || undefined;
+    b.connection    = document.getElementById(`sf-conn-${boardIdx}`).value.trim()   || undefined;
+    b.script        = document.getElementById(`sf-script-${boardIdx}`).value.trim() || undefined;
+    b.masserase     = document.getElementById(`sf-masserase-${boardIdx}`).checked;
+    b.halt_reset    = document.getElementById(`sf-halt-${boardIdx}`).checked;
+    b.open_terminal = document.getElementById(`sf-term-${boardIdx}`).checked;
+    // Clean undefined
+    Object.keys(b).forEach(k => { if (b[k] === undefined) delete b[k]; });
+    await sfSaveBack();
+    const content = window.jsyaml ? window.jsyaml.dump(parsedScenario, { lineWidth: -1 }) : "";
+    renderYaml(content);
+    toggleSection(`board:${boardIdx}`);
+}
+
+async function sfRemoveBoard(event, boardIdx) {
+    event.stopPropagation();
+    const nick = parsedScenario.boards[boardIdx].nickname || `Board ${boardIdx}`;
+    if (!confirm(`Remove ${nick}?`)) return;
+    parsedScenario.boards.splice(boardIdx, 1);
+    await sfSaveBack();
+    const content = window.jsyaml ? window.jsyaml.dump(parsedScenario, { lineWidth: -1 }) : "";
+    renderYaml(content);
+}
+
+async function sfSaveBack() {
+    if (!activeScenario) return;
+    const content = window.jsyaml ? window.jsyaml.dump(parsedScenario, { lineWidth: -1 }) : "";
+    if (!content) return;
+    await fetch("/api/scenario-update", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base: scenariBaseDir, path: activeScenario.key, content })
+    });
+}
+
