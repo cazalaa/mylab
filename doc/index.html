@@ -316,8 +316,9 @@ section { scroll-margin-top: 0; }
     <a href="#overview">Overview</a>
     <a href="#sdm">SDM</a>
     <a href="#maintenance">Maintenance</a>
+    <a href="#groups" class="sub">Groups</a>
     <a href="#manual-control">Manual Control</a>
-    <a href="#script-control">Script Control</a>
+    <a href="#scenario-control">Scenario Control</a>
 
     <div class="nav-section">Scripting</div>
     <a href="#scenario-yaml">Scenario YAML</a>
@@ -405,7 +406,7 @@ web_port = 8080   <span class="c"># internal Flask port (configurable)</span></p
 
 <div class="figure">
   <img src="img/img_topbar.png" alt="My Lab navigation bar">
-  <figcaption>Figure 1 — My Lab navigation bar: SDM, Maintenance, Manual Control, Script Control</figcaption>
+  <figcaption>Figure 1 — My Lab navigation bar: SDM, Maintenance, Manual Control, Scenario Control</figcaption>
 </div>
 
 <p>The application starts as a compact collapsed bar. Clicking any tab expands the window to reveal the corresponding page. SDM is started automatically at launch — stale Silink instances from previous sessions are cleaned up by a stop/start cycle.</p>
@@ -448,6 +449,23 @@ web_port = 8080   <span class="c"># internal Flask port (configurable)</span></p
     <tr><td>Board Upgrade</td><td>adapter fwupgrade</td><td>Upgrades the J-Link adapter firmware</td></tr>
   </tbody>
 </table>
+
+<h3 id="groups">Groups — Uses &amp; Benefits</h3>
+<p>
+    A group is a saved, named set of adapters. Once created from the Maintenance page's Selected panel,
+    a group can be reused across the application in several ways:
+</p>
+<ul>
+    <li><strong>Maintenance filtering</strong> — Load Group restores the exact selection into the Selected panel so you can run Chip Erase, Chip Recover, or Board Upgrade on that set in one click.</li>
+    <li><strong>Manual Control filtering</strong> — the source selector in Manual Control lists all saved groups; picking one shows only those adapters' cards, keeping your workspace focused.</li>
+    <li><strong>Scenario creation</strong> — when editing a scenario in Scenario Control, the <em>From group</em> button imports the group's adapters as board entries, pre-filling nickname, board type, and IP address automatically.</li>
+</ul>
+<p>
+    Groups are therefore a central organisation tool: create one group per demo setup, one per test bench,
+    or one per team member's desk. This lets you switch context instantly — load a different group and
+    every page reflects the right set of boards without reconfiguring anything manually.
+</p>
+<div class="note"><strong>ℹ</strong> When you re-save a group after a board's details change (nickname, IP, board type), the new data is stored and will be used the next time the group is imported into a scenario.</div>
 <div class="note"><strong>ℹ</strong> USB boards use <code>--serialno &lt;serial&gt;</code>, Ethernet boards use <code>--ip &lt;address&gt;</code> automatically.</div>
 </section>
 
@@ -475,13 +493,13 @@ web_port = 8080   <span class="c"># internal Flask port (configurable)</span></p
 </div>
 </section>
 
-<section id="script-control">
-<h2>Script Control</h2>
-<p>Script Control enables automated multi-board test execution using YAML scenario files paired with Python scripts.</p>
+<section id="scenario-control">
+<h2>Scenario Control</h2>
+<p>Scenario Control enables automated multi-board test execution using YAML scenario files paired with Python scripts.</p>
 
 <div class="figure">
-  <img src="img/img_script.png" alt="Script Control page">
-  <figcaption>Figure 6 — Script Control: scenario browser (left), structured sections editor (right)</figcaption>
+  <img src="img/img_script.png" alt="Scenario Control page">
+  <figcaption>Figure 6 — Scenario Control: scenario browser (left), structured sections editor (right)</figcaption>
 </div>
 
 <h3>Toolbar</h3>

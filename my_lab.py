@@ -392,7 +392,7 @@ class WindowAPI:
         if file_types is None:
             file_types = ("All files (*.*)",)
         result = webview.windows[0].create_file_dialog(
-            webview.OPEN_DIALOG,
+            webview.FileDialog.OPEN,
             directory=str(directory),
             allow_multiple=False,
             file_types=tuple(file_types)
@@ -401,7 +401,7 @@ class WindowAPI:
 
     def pick_directory(self, directory=""):
         result = webview.windows[0].create_file_dialog(
-            webview.FOLDER_DIALOG,
+            webview.FileDialog.FOLDER,
             directory=str(directory),
         )
         return result[0] if result else None
@@ -410,7 +410,7 @@ class WindowAPI:
         if file_types is None:
             file_types = ("YAML files (*.yaml)", "All files (*.*)")
         result = webview.windows[0].create_file_dialog(
-            webview.SAVE_DIALOG,
+            webview.FileDialog.SAVE,
             directory=str(directory),
             file_types=tuple(file_types)
         )
@@ -438,7 +438,7 @@ class TerminalWindowAPI:
         wins = webview.windows
         win  = wins[-1] if len(wins) > 1 else wins[0]
         result = win.create_file_dialog(
-            webview.OPEN_DIALOG,
+            webview.FileDialog.OPEN,
             directory=str(directory),
             allow_multiple=False,
             file_types=tuple(file_types)
