@@ -1,0 +1,21 @@
+{
+  "name": "Test_bureau",
+  "adapters": [
+    {
+      "serialNumber": "440052838",
+      "connectivityType": "ethernet",
+      "host": "192.168.8.213",
+      "nickname": "jerome.local#1",
+      "boardId": "BRD4163A",
+      "boardLabel": "BRD4163A Rev A04"
+    },
+    {
+      "serialNumber": "440044365",
+      "connectivityType": "ethernet",
+      "host": "192.168.8.152",
+      "nickname": "jerome.local#0",
+      "boardId": "BRD4163A",
+      "boardLabel": "BRD4163A Rev A01"
+    }
+  ]
+}

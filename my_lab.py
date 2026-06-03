@@ -304,6 +304,11 @@ def get_connections(serial_number: str, timeout: int = 8) -> dict:
 def index():
     return render_template("index.html")
 
+@app.route("/page/script_control_v2")
+def page_script_control_v2():
+    return render_template("script_control_v2.html")
+
+
 @app.route("/page/<name>")
 def page(name):
     if name not in ALLOWED_PAGES:
@@ -383,12 +388,6 @@ class WindowAPI:
     def set_height(self, height):
         webview.windows[0].resize(WIN_W, height)
 
-    def pick_directory(self):
-        result = webview.windows[0].create_file_dialog(
-            webview.FOLDER_DIALOG
-        )
-        return result[0] if result else None
-
     def pick_file(self, directory="", file_types=None):
         if file_types is None:
             file_types = ("All files (*.*)",)
@@ -399,7 +398,24 @@ class WindowAPI:
             file_types=tuple(file_types)
         )
         return result[0] if result else None
-    
+
+    def pick_directory(self, directory=""):
+        result = webview.windows[0].create_file_dialog(
+            webview.FOLDER_DIALOG,
+            directory=str(directory),
+        )
+        return result[0] if result else None
+
+    def save_file(self, directory="", file_types=None):
+        if file_types is None:
+            file_types = ("YAML files (*.yaml)", "All files (*.*)")
+        result = webview.windows[0].create_file_dialog(
+            webview.SAVE_DIALOG,
+            directory=str(directory),
+            file_types=tuple(file_types)
+        )
+        return result[0] if result else None
+
     def open_terminal(self, serial):
         """Appelé depuis le JS via pywebview.api.open_terminal(serial)"""
         def _open():
@@ -408,9 +424,26 @@ class WindowAPI:
                 f"{serial} — Terminal",
                 url,
                 width=820, height=620,
-                resizable=True
+                resizable=True,
+                js_api=TerminalWindowAPI()
             )
         threading.Thread(target=_open, daemon=True).start()
+
+
+class TerminalWindowAPI:
+    """JS API for terminal windows — provides pick_file."""
+    def pick_file(self, directory="", file_types=None):
+        if file_types is None:
+            file_types = ("Python scripts (*.py)", "All files (*.*)")
+        wins = webview.windows
+        win  = wins[-1] if len(wins) > 1 else wins[0]
+        result = win.create_file_dialog(
+            webview.OPEN_DIALOG,
+            directory=str(directory),
+            allow_multiple=False,
+            file_types=tuple(file_types)
+        )
+        return result[0] if result else None
 
 # ── terminal page ──────────────────────────────────
 @app.route("/terminal/<serial>")
@@ -418,6 +451,84 @@ def terminal_page(serial):
     return render_template("terminal.html", serial=serial)
 
 # ── adapter info endpoint (pour le terminal) ───────
+@app.route("/api/terminal-run-script", methods=["POST"])
+def terminal_run_script():
+    """Run a Python script on a board from the terminal window."""
+    serial      = request.json.get("serial", "")
+    script_path = request.json.get("script_path", "")
+    room        = f"{serial}_vcom"
+
+    if not os.path.isfile(script_path):
+        return jsonify({"ok": False, "error": "File not found"}), 400
+
+    def emit_out(msg, color="default"):
+        colors = {"green": "\x1b[32m", "red": "\x1b[31m", "yellow": "\x1b[33m", "default": "\x1b[0m"}
+        prefix = colors.get(color, "\x1b[0m")
+        socketio.emit("terminal_output", {"data": f"{prefix}{msg}\x1b[0m\r\n", "room": room}, room=room)
+
+    def run():
+        emit_out(f"▶ Running {os.path.basename(script_path)}", "yellow")
+        try:
+            with open(script_path) as f:
+                code = f.read()
+
+            # Reuse existing telnet sockets from the terminal window
+            vcom_sock  = active_telnets.get(f"{serial}_vcom")
+            admin_sock = active_telnets.get(f"{serial}_admin")
+
+            if not vcom_sock or not admin_sock:
+                # Sockets not yet open — connect fresh
+                info         = get_connections(serial)
+                adapter      = info.get("adapter", {})
+                conns        = info.get("connections", [])
+                ports        = {c["portName"]: c["portNumber"] for c in conns}
+                connectivity = adapter.get("connectivityType", "usb")
+                host         = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
+                vcom_port    = ports.get("serial1")
+                admin_port   = ports.get("admin")
+                if not vcom_port or not admin_port:
+                    emit_out("✗ Could not get board ports from SDM", "red")
+                    return
+                board_obj = Board(
+                    serial       = serial,
+                    host         = host,
+                    vcom_port    = vcom_port,
+                    admin_port   = admin_port,
+                    run_id       = None,
+                    scenario_dir = "",
+                )
+                board_obj.connect()
+            else:
+                # Inject existing sockets — no new connections needed
+                board_obj = Board(
+                    serial       = serial,
+                    host         = "127.0.0.1",  # not used when sockets provided
+                    vcom_port    = 0,
+                    admin_port   = 0,
+                    run_id       = None,
+                    scenario_dir = "",
+                )
+                board_obj._vcom_sock  = vcom_sock
+                board_obj._admin_sock = admin_sock
+
+            # Register so _start_reader dispatches to this board
+            active_boards[f"{serial}_vcom"]  = board_obj
+            active_boards[f"{serial}_admin"] = board_obj
+
+            namespace = {"board": board_obj, "time": time, "__builtins__": __builtins__}
+            exec(code, namespace)
+            if "script" in namespace and callable(namespace["script"]):
+                namespace["script"](board_obj)
+            emit_out("✓ Script completed", "green")
+        except Exception as e:
+            import traceback
+            emit_out(f"✗ {e}", "red")
+            emit_out(traceback.format_exc(), "red")
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/terminal-info/<serial>")
 def terminal_info(serial):
     try:
@@ -484,16 +595,31 @@ def handle_connect_telnet(data):
 
         def reader():
             print(f"[TELNET] reader started: {room}")
+            is_vcom = room.endswith("_vcom")
+            buf = []
             while True:
                 try:
                     chunk = tn.recv(4096)
                     if not chunk:
                         print(f"[TELNET] empty chunk, closing: {room}")
                         break
+                    text = chunk.decode("utf-8", errors="replace")
                     print(f"[TELNET] data received: {room} {len(chunk)} bytes")
                     socketio.emit("terminal_output",
-                                {"data": chunk.decode("utf-8", errors="replace"), "room": room},
+                                {"data": text, "room": room},
                                 room=room)
+                    # Dispatch to board listeners (for script execution)
+                    board = active_boards.get(room)
+                    if board:
+                        buf.append(text)
+                        combined  = "".join(buf)
+                        prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
+                        listeners = board._vcom_listeners if is_vcom else board._admin_listeners
+                        for listener in list(listeners):
+                            try: listener(combined)
+                            except: pass
+                        if prompt in combined:
+                            buf.clear()
                 except Exception as e:
                     print(f"[TELNET] reader error: {room}: {e}")
                     break
@@ -668,6 +794,44 @@ def scenario_mkdir():
         return jsonify({"error": "invalid path"}), 400
     os.makedirs(full, exist_ok=True)
     return jsonify({"ok": True})
+
+@app.route("/api/scenario-open", methods=["GET"])
+def scenario_open():
+    """Read a YAML file by absolute path for the v2 editor."""
+    path = request.args.get("path", "")
+    path = os.path.abspath(path)
+    if not os.path.isfile(path) or not path.endswith((".yaml", ".yml")):
+        return jsonify({"ok": False, "error": "Invalid file"}), 400
+    with open(path) as f:
+        content = f.read()
+    return jsonify({
+        "ok":       True,
+        "content":  content,
+        "dir":      os.path.dirname(path),
+        "filename": os.path.basename(path),
+    })
+
+
+@app.route("/api/scenario-open-save", methods=["POST"])
+def scenario_open_save():
+    """Write YAML content to an absolute path for the v2 editor."""
+    path    = request.json.get("path", "")
+    content = request.json.get("content", "")
+    print(f"[SAVE] path={path!r} content_len={len(content)}")
+    path    = os.path.abspath(path)
+    print(f"[SAVE] abspath={path!r}")
+    if not path.endswith((".yaml", ".yml")):
+        print(f"[SAVE] rejected: not yaml")
+        return jsonify({"ok": False, "error": "Must be a .yaml file"}), 400
+    if not content.strip():
+        print(f"[SAVE] rejected: empty content")
+        return jsonify({"ok": False, "error": "Content is empty"}), 400
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content)
+    print(f"[SAVE] wrote {len(content)} chars to {path}")
+    return jsonify({"ok": True, "dir": os.path.dirname(path)})
+
 
 @app.route("/api/scenario-update", methods=["POST"])
 def scenario_update():
@@ -1280,7 +1444,7 @@ class Board:
 
         if self.open_terminal_flag:
             def _open():
-                url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}"
+                url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}?from_run=1"
                 webview.create_window(
                     f"{self.serial} — Terminal",
                     url,

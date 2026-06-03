@@ -121,15 +121,39 @@ body {
 .term-pane .xterm-viewport::-webkit-scrollbar-thumb { background: #b5bfc6; border-radius: 3px; }
 .term-pane .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6E7F8D; }
 
-/* ── action bar (Reset/PB) ── */
+
+/* ── action bar (Reset/PB/Script) ── */
 .term-action-bar {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 12px;
+    gap: 8px;
     padding: 6px 16px 8px;
     background: #EFF2F9;
     flex-shrink: 0;
+}
+.term-action-sep {
+    width: 1px;
+    height: 20px;
+    background: rgba(22,27,29,0.12);
+    flex-shrink: 0;
+}
+.term-script-name {
+    flex: 1;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #8899aa;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.term-run-btn {
+    background: #1D9E75 !important;
+    color: white !important;
+}
+.term-run-btn:disabled {
+    background: #EFF2F9 !important;
+    color: #b5bfc6 !important;
+    opacity: 1 !important;
 }
 .term-action-btn {
     height: 32px;
@@ -245,10 +269,16 @@ body {
     <button class="term-send-btn" onclick="sendCommand()">⏎</button>
 </div>
 
-<div class="term-action-bar" id="termActionBar" style="display:none">
-    <button class="term-action-btn" onclick="termCmd('target reset 100')">Reset</button>
-    <button class="term-action-btn" onclick="termPb(1)">PB1</button>
-    <button class="term-action-btn" onclick="termPb(0)">PB0</button>
+<div class="term-action-bar" id="termActionBar">
+    <span class="term-admin-btns" id="termAdminBtns" style="display:none; contents">
+        <button class="term-action-btn" onclick="termCmd('target reset 100')">Reset</button>
+        <button class="term-action-btn" onclick="termPb(1)">PB1</button>
+        <button class="term-action-btn" onclick="termPb(0)">PB0</button>
+        <div class="term-action-sep"></div>
+    </span>
+    <button class="term-action-btn" onclick="pickScript()">📁 Script</button>
+    <span class="term-script-name" id="termScriptName">no script selected</span>
+    <button class="term-action-btn term-run-btn" id="termRunBtn" onclick="runScript()" disabled>▶ Run</button>
 </div>
 
 <script>
@@ -485,10 +515,9 @@ function setStatus(kind, state) {
 
     // Show action bar when admin is connected, then refit all terminals
     if (kind === "admin") {
-        const bar = document.getElementById("termActionBar");
-        if (bar) {
-            bar.style.display = state === "connected" ? "flex" : "none";
-            // Refit after layout recalculates with/without the bar
+        const btns = document.getElementById("termAdminBtns");
+        if (btns) {
+            btns.style.display = state === "connected" ? "contents" : "none";
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     Object.values(terminals).forEach(({ term, pane }) => fitTerm(term, pane));
@@ -514,7 +543,58 @@ async function termPb(pb) {
 
     btns.forEach(b => b.disabled = false);
 }
-// ── resize ────────────────────────────────────────
+// ── script picker & runner ─────────────────────────
+let selectedScriptPath = null;
+
+// Hide script controls if opened from a scenario run
+if (new URLSearchParams(window.location.search).get("from_run") === "1") {
+    setTimeout(() => {
+        // Find and hide the 📁 Script button (no ID, find by onclick)
+        const bar = document.getElementById("termActionBar");
+        if (bar) {
+            bar.querySelectorAll("button").forEach(btn => {
+                if (btn.getAttribute("onclick") === "pickScript()") btn.style.display = "none";
+            });
+        }
+        const runBtn = document.getElementById("termRunBtn");
+        const nameEl = document.getElementById("termScriptName");
+        if (runBtn) runBtn.style.display = "none";
+        if (nameEl) nameEl.style.display = "none";
+    }, 50);
+}
+
+async function pickScript() {
+    let path = null;
+    if (window.pywebview && window.pywebview.api) {
+        path = await window.pywebview.api.pick_file("", ["Python scripts (*.py)", "All files (*.*)"]);
+    } else {
+        path = prompt("Script path:");
+    }
+    if (!path) return;
+    selectedScriptPath = path;
+    const name = path.split("/").pop().split("\\").pop();
+    document.getElementById("termScriptName").innerText = name;
+    document.getElementById("termRunBtn").disabled = false;
+}
+
+async function runScript() {
+    if (!selectedScriptPath) return;
+    const btn = document.getElementById("termRunBtn");
+    btn.disabled = true;
+    btn.innerText = "⏳ Running";
+    try {
+        await fetch("/api/terminal-run-script", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ serial, script_path: selectedScriptPath })
+        });
+    } finally {
+        btn.innerText = "▶ Run";
+        btn.disabled = false;
+    }
+}
+
+
 window.addEventListener("resize", () => {
     Object.values(terminals).forEach(({ term, pane }) => fitTerm(term, pane));
 });
