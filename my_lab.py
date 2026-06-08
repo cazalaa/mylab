@@ -304,10 +304,6 @@ def get_connections(serial_number: str, timeout: int = 8) -> dict:
 def index():
     return render_template("index.html")
 
-@app.route("/page/script_control_v2")
-def page_script_control_v2():
-    return render_template("script_control_v2.html")
-
 
 @app.route("/page/<name>")
 def page(name):
@@ -448,7 +444,8 @@ class TerminalWindowAPI:
 # ── terminal page ──────────────────────────────────
 @app.route("/terminal/<serial>")
 def terminal_page(serial):
-    return render_template("terminal.html", serial=serial)
+    terminal_mode = config["server"].get("terminal_mode", "modern").strip().lower()
+    return render_template("terminal.html", serial=serial, terminal_mode=terminal_mode)
 
 # ── adapter info endpoint (pour le terminal) ───────
 @app.route("/api/terminal-run-script", methods=["POST"])
@@ -676,6 +673,9 @@ def handle_connect_tty(data):
         print(f"[ERROR] connect_tty {tty_path}: {e}")
         emit("terminal_error", {"message": str(e)})
 
+# Per-session input buffer for admin channels (accumulate keystrokes → emit terminal_cmd on \r)
+_admin_input_buf = {}  # sid -> str
+
 @socketio.on("terminal_input")
 def handle_terminal_input(data):
     room = data["room"]
@@ -686,6 +686,18 @@ def handle_terminal_input(data):
                 tn.sendall(data["data"].encode("utf-8"))
             else:
                 tn.write(data["data"].encode("utf-8"))
+            # For admin channels: accumulate and emit terminal_cmd on Enter
+            if not room.endswith("_vcom"):
+                sid = request.sid
+                raw = data["data"]
+                if raw in ("\r", "\n", "\r\n"):
+                    cmd = _admin_input_buf.pop(sid, "").strip()
+                    if cmd:
+                        socketio.emit("terminal_cmd", {"data": cmd, "room": room}, room=room)
+                elif raw == "\x7f" or raw == "\x08":  # backspace
+                    _admin_input_buf[sid] = _admin_input_buf.get(sid, "")[:-1]
+                else:
+                    _admin_input_buf[sid] = _admin_input_buf.get(sid, "") + raw
         except Exception as e:
             emit("terminal_error", {"message": str(e)})
 
@@ -1514,8 +1526,12 @@ class Board:
                 data = data.encode("utf-8")
             self._vcom_sock.sendall(data)
             vcom_room = f"{self.serial}_vcom"
+            cmd_str = data.decode("utf-8", errors="replace").rstrip("\r\n")
             socketio.emit("terminal_echo",
-                          {"data": data.decode("utf-8", errors="replace"), "room": vcom_room},
+                          {"data": cmd_str, "room": vcom_room},
+                          room=vcom_room)
+            socketio.emit("terminal_cmd",
+                          {"data": cmd_str, "room": vcom_room},
                           room=vcom_room)
 
     def read_cli(self, timeout=2.0):
@@ -1556,6 +1572,10 @@ class Board:
         payload = cmd.encode("utf-8") + self._vcom_le
         if self._vcom_echo and hasattr(self, '_vcom_expecting_echo'):
             self._vcom_expecting_echo[0] = True
+        vcom_room = f"{self.serial}_vcom"
+        socketio.emit("terminal_cmd",
+                      {"data": cmd.strip(), "room": vcom_room},
+                      room=vcom_room)
         self._vcom_sock.sendall(payload)
 
         event.wait(timeout=timeout)
@@ -1584,6 +1604,9 @@ class Board:
         admin_room = f"{self.serial}_admin"
         socketio.emit("terminal_echo",
                       {"data": f"{cmd}", "room": admin_room},
+                      room=admin_room)
+        socketio.emit("terminal_cmd",
+                      {"data": cmd, "room": admin_room},
                       room=admin_room)
 
     def admin(self, cmd, timeout=10.0):
