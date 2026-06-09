@@ -487,9 +487,22 @@ web_port = 8080   <span class="c"># internal Flask port (configurable)</span></p
 
 <p>The terminal window shows two tabs: <strong>VCOM</strong> for CLI commands and <strong>ADMIN</strong> for the J-Link admin interface. Hardware control buttons (Reset, PB0, PB1) are also available at the bottom of the terminal.</p>
 
+<h3>Display modes</h3>
+<p>The terminal supports two display modes, configurable in <code>config.ini</code> under <code>[server]</code>:</p>
+<pre>terminal_mode = modern   <span class="c"># or: classic</span></pre>
+
+<p><strong>Classic mode</strong> renders raw serial output in a standard terminal emulator (xterm), identical to a direct serial console.</p>
+
 <div class="figure">
-  <img src="img/img_terminal.png" alt="Terminal window">
-  <figcaption>Figure 5 — Terminal window: VCOM output, ADMIN tab, hardware buttons</figcaption>
+  <img src="img/img_terminal.png" alt="Terminal — Classic mode">
+  <figcaption>Figure 5a — Terminal: Classic mode</figcaption>
+</div>
+
+<p><strong>Modern mode</strong> (default) parses the serial stream into a structured timeline. Each command is shown as a collapsible block with its response. Spontaneous events from the board are grouped and displayed separately with a ⚡ icon. Single-line responses are displayed inline without requiring any interaction.</p>
+
+<div class="figure">
+  <img src="img/img_terminal_modern.png" alt="Terminal — Modern mode">
+  <figcaption>Figure 5b — Terminal: Modern mode — commands, responses, and events on a timeline</figcaption>
 </div>
 </section>
 
