@@ -469,14 +469,14 @@ def terminal_run_script():
         prefix = colors.get(color, "\x1b[0m")
         socketio.emit("terminal_output", {"data": f"{prefix}{msg}\x1b[0m\r\n", "room": room}, room=room)
         # Also emit as a structured group for Modern View
-        color_map = {"green": "success", "red": "error", "yellow": "script", "default": "default"}
+        color_map = {"green": "script", "red": "error", "yellow": "script", "default": "default"}
         from parsers import make_group
         g = make_group(type_="event", summary=msg, category="script",
                        color=color_map.get(color, "default"))
         socketio.emit("terminal_script_event", {"room": room, "group": g}, room=room)
 
     def run():
-        emit_out(f"▶ Running {os.path.basename(script_path)}", "yellow")
+        emit_out(f"Running {os.path.basename(script_path)}", "yellow")
         try:
             with open(script_path) as f:
                 code = f.read()
@@ -528,7 +528,7 @@ def terminal_run_script():
             exec(code, namespace)
             if "script" in namespace and callable(namespace["script"]):
                 namespace["script"](board_obj)
-            emit_out("✓ Script completed", "green")
+            emit_out("Script completed", "green")
         except Exception as e:
             import traceback
             emit_out(f"✗ {e}", "red")

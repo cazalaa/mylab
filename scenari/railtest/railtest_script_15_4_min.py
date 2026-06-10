@@ -12,4 +12,5 @@ def script(board):
     board.cli("rx 0")
     board.cli("config2p4GHz802154")
     board.cli("tx 2")
+    board.cli("getmemw 0 4")
     

@@ -78,7 +78,7 @@ def _color_for(cmd: str, fields: dict) -> str:
         failed = int(fields.get("failed", "0") or "0")
         if status != "Complete" or failed > 0:
             return "error"
-        return "success"
+        return "default"
     if cmd == "rxPacket":
         crc  = fields.get("crc", "Pass")
         rssi = fields.get("rssi", "0")
@@ -117,21 +117,21 @@ def _fmt(cmd: str | None, fields: dict, raw: str) -> str:
         built = fields.get("Built", "")
         cause = fields.get("Cause", "")
         extra = (f"  built {built}" if built else "") + (f"  cause {cause}" if cause else "")
-        return f"↺ Reset — {app}{extra}"
+        return f"Reset — {app}{extra}"
 
     if cmd == "appMode":
         mode  = next((v for v in fields.values() if v == "Enabled"), "?")
         pktTx = fields.get("PacketTx", "")
         t     = fields.get("Time", "")
-        return f"◉ Mode → {mode}  PacketTx:{pktTx}" + (f"  t={t}" if t else "")
+        return f"Mode → {mode}  PacketTx:{pktTx}" + (f"  t={t}" if t else "")
 
     if cmd == "txEnd":
         status = fields.get("txStatus", "?")
         sent   = fields.get("transmitted", "?")
         failed = fields.get("failed", "0")
         t      = fields.get("lastTxTime", "")
-        ok     = "✓" if status == "Complete" and failed == "0" else "✗"
-        return f"↑ TX {ok} {status}  sent:{sent}  failed:{failed}" + (f"  t={t}" if t else "")
+        ok = ""
+        return f"TX {status}  sent:{sent}  failed:{failed}" + (f"  t={t}" if t else "")
 
     if cmd == "rxPacket":
         rssi = fields.get("rssi", "?")
@@ -143,30 +143,30 @@ def _fmt(cmd: str | None, fields: dict, raw: str) -> str:
         if lqi:  parts.append(f"LQI:{lqi}")
         if crc:  parts.append(f"CRC:{crc}")
         if t:    parts.append(f"t={t}")
-        summary = "↓ RX packet — " + " | ".join(parts)
+        summary = "RX packet — " + " | ".join(parts)
         return summary
 
     if cmd == "tx":
         pktTx = fields.get("PacketTx", "")
         t     = fields.get("Time", "")
-        return f"↑ TX started — PacketTx:{pktTx}" + (f"  t={t}" if t else "")
+        return f"TX started — PacketTx:{pktTx}" + (f"  t={t}" if t else "")
 
     if cmd == "rx":
         state = fields.get("Rx", "?")
         t     = fields.get("Time", "")
-        return f"⟳ RX → {state}" + (f"  t={t}" if t else "")
+        return f"RX → {state}" + (f"  t={t}" if t else "")
 
     if cmd == "rxAckTimeout":
         dur = fields.get("ackTimeoutDuration", "")
-        return f"⚠ ACK timeout" + (f"  duration:{dur}" if dur else "")
+        return f"ACK timeout" + (f"  duration:{dur}" if dur else "")
 
     if cmd == "rxAbort":
         cause = fields.get("errorCode", fields.get("Cause", ""))
-        return f"✗ RX aborted" + (f"  cause:{cause}" if cause else "")
+        return f"RX aborted" + (f"  cause:{cause}" if cause else "")
 
     if cmd == "assert":
         msg = " | ".join(f"{k}:{v}" for k, v in fields.items())
-        return f"‼ Assert — {msg}"
+        return f"Assert — {msg}"
 
     # Generic fallback
     label = cmd
@@ -290,7 +290,7 @@ class RailtestParser(BaseParser):
             app   = rf.get("App", "?")
             built = rf.get("Built", "")
             cause = rf.get("Cause", "")
-            summary = f"↺ Boot — {app}" + (f"  built {built}" if built else "") + (f"  cause {cause}" if cause else "")
+            summary = f"Boot — {app}" + (f"  built {built}" if built else "") + (f"  cause {cause}" if cause else "")
             # Build current detail from all lines so far
             detail_parts = []
             for bc in ("reset", "radio", "system", "pti"):
@@ -400,7 +400,7 @@ class RailtestParser(BaseParser):
         app   = rf.get("App", "?")
         built = rf.get("Built", "")
         cause = rf.get("Cause", "")
-        summary = f"↺ Boot — {app}" + (f"  built {built}" if built else "") + (f"  cause {cause}" if cause else "")
+        summary = f"Boot — {app}" + (f"  built {built}" if built else "") + (f"  cause {cause}" if cause else "")
         # Build detail: one line per boot cmd
         detail_parts = []
         for cmd in ("reset", "radio", "system", "pti"):
@@ -427,7 +427,7 @@ class RailtestParser(BaseParser):
         rows = self._multi_rows
         raw  = self._multi_raw
         # Build summary
-        summary = f"◈ {cmd} — {len(rows)} row(s)"
+        summary = f"{cmd} — {len(rows)} row(s)"
         # Build detail table
         if tags and rows:
             header = " | ".join(tags)
@@ -448,6 +448,7 @@ class RailtestParser(BaseParser):
             raw      = raw,
             category = "info",
             color    = "default",
+            cmd      = cmd,
         )
 
     # ── Low-level parse_line (kept for compatibility) ─────────────────────────
