@@ -126,6 +126,12 @@ HOST = config["server"].get("host", "127.0.0.1")
 PORT = config["server"].get("port", "3129")
 WEB_PORT = int(config["server"].get("web_port", "8080"))
 
+# Terminal parser config
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from parsers import get_parser
+TERMINAL_PARSER  = config["server"].get("parser",           "auto").strip().lower()
+TERMINAL_PRETTY  = config["server"].get("terminal_pretty",  "true").strip().lower() == "true"
+
 SDM_BASE = f"http://{HOST}:{PORT}"
 
 app = Flask(__name__)
@@ -462,6 +468,12 @@ def terminal_run_script():
         colors = {"green": "\x1b[32m", "red": "\x1b[31m", "yellow": "\x1b[33m", "default": "\x1b[0m"}
         prefix = colors.get(color, "\x1b[0m")
         socketio.emit("terminal_output", {"data": f"{prefix}{msg}\x1b[0m\r\n", "room": room}, room=room)
+        # Also emit as a structured group for Modern View
+        color_map = {"green": "success", "red": "error", "yellow": "script", "default": "default"}
+        from parsers import make_group
+        g = make_group(type_="event", summary=msg, category="script",
+                       color=color_map.get(color, "default"))
+        socketio.emit("terminal_script_event", {"room": room, "group": g}, room=room)
 
     def run():
         emit_out(f"▶ Running {os.path.basename(script_path)}", "yellow")
@@ -565,8 +577,33 @@ def terminal_info(serial):
         return jsonify({"error": str(e)}), 500
 
 # ── WebSocket telnet bridge ────────────────────────
-active_telnets = {}  # room_id -> socket
-active_boards  = {}  # room_id -> current Board instance (updated each run)
+active_telnets = {}   # room_id -> socket
+active_boards  = {}   # room_id -> current Board instance (updated each run)
+_room_parsers  = {}   # room_id -> BaseParser (for interactive terminal pretty display)
+
+def _extract_groups(text: str, line_buf: list, parser) -> list:
+    """
+    Accumulate raw TCP fragments into complete lines, feed each to the parser,
+    and return a list of Group dicts ready for display.
+
+    line_buf[0] holds the current incomplete line fragment across calls.
+    """
+    combined  = line_buf[0] + text
+    combined  = combined.replace("\r\n", "\n").replace("\r", "\n")
+    parts     = combined.split("\n")
+    line_buf[0] = parts[-1]          # keep trailing fragment for next call
+    complete  = parts[:-1]
+
+    groups = []
+    for raw_line in complete:
+        line = raw_line.strip()
+        if not line:
+            continue
+        # Strip any prompt-prefix artifact ("> ") before a {{ line
+        parse_line = re.sub(r'^>\s+(?=\{\{)', '', line)
+        groups.extend(parser.feed(parse_line))
+    return groups
+
 
 @socketio.on("connect_telnet")
 def handle_connect_telnet(data):
@@ -590,10 +627,15 @@ def handle_connect_telnet(data):
 
         active_telnets[room] = tn
 
+        # Per-room parser and line buffer for pretty display
+        _room_parsers[room] = get_parser(TERMINAL_PARSER)
+        parse_line_buf = [""]   # line fragment accumulator for pretty
+
         def reader():
             print(f"[TELNET] reader started: {room}")
             is_vcom = room.endswith("_vcom")
             buf = []
+            room_parser = _room_parsers.get(room)
             while True:
                 try:
                     chunk = tn.recv(4096)
@@ -601,10 +643,15 @@ def handle_connect_telnet(data):
                         print(f"[TELNET] empty chunk, closing: {room}")
                         break
                     text = chunk.decode("utf-8", errors="replace")
-                    print(f"[TELNET] data received: {room} {len(chunk)} bytes")
+                    groups = []
+                    if room_parser and TERMINAL_PRETTY:
+                        try:
+                            groups = _extract_groups(text, parse_line_buf, room_parser)
+                        except Exception as _pe:
+                            print(f"[PARSER] error: {_pe}")
                     socketio.emit("terminal_output",
-                                {"data": text, "room": room},
-                                room=room)
+                                  {"data": text, "room": room, "groups": groups},
+                                  room=room)
                     # Dispatch to board listeners (for script execution)
                     board = active_boards.get(room)
                     if board:
@@ -622,6 +669,7 @@ def handle_connect_telnet(data):
                     break
             socketio.emit("terminal_closed", {"room": room}, room=room)
             active_telnets.pop(room, None)
+            _room_parsers.pop(room, None)
         threading.Thread(target=reader, daemon=True).start()
         emit("terminal_ready", {"room": room})
         print(f"[TELNET] terminal_ready emitted: {room}")
@@ -1413,6 +1461,7 @@ class Board:
         self._vcom_expecting_echo = [False]  # ← default, always valid
         self._log_path = None
         self._scenario_ctx = None  # set by Scenario when global script is used
+        self.parser = get_parser(TERMINAL_PARSER)  # protocol parser (auto/railtest/generic)
 
     # ── configuration ────────────────────────────────────────
     def config_vcom(self, line_ending="CRLF", echo=True, prompt=">"):
@@ -1469,6 +1518,7 @@ class Board:
         is_vcom  = room.endswith("_vcom")
         stream   = "vcom" if is_vcom else "admin"
         buf      = []   # accumulates chunks until prompt found
+        parse_line_buf = [""]  # line fragment accumulator for pretty
 
         def flush(board):
             if not buf:
@@ -1487,9 +1537,16 @@ class Board:
                     if not chunk:
                         break
                     text = chunk.decode("utf-8", errors="replace")
+                    board  = active_boards.get(room)
+                    groups = []
+                    if board and TERMINAL_PRETTY:
+                        try:
+                            groups = _extract_groups(text, parse_line_buf, board.parser)
+                        except Exception as _pe:
+                            print(f"[PARSER] error: {_pe}")
                     socketio.emit("terminal_output",
-                                  {"data": text, "room": room}, room=room)
-                    board = active_boards.get(room)
+                                  {"data": text, "room": room, "groups": groups},
+                                  room=room)
                     if board:
                         if board._log_path:
                             ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -1500,17 +1557,13 @@ class Board:
                         prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
                         combined  = "".join(buf)
                         listeners = board._vcom_listeners if is_vcom else board._admin_listeners
-                        # Dispatch combined buffer to listeners so they always
-                        # see the full accumulated response including the prompt
                         for listener in list(listeners):
                             try: listener(combined)
                             except: pass
-                        # Flush to run panel once prompt detected
                         if prompt in combined:
                             flush(board)
                 except Exception:
                     break
-            # Flush any remaining data on disconnect
             board = active_boards.get(room)
             if board and buf:
                 flush(board)
@@ -1563,6 +1616,12 @@ class Board:
         prompt   = self._vcom_prompt
 
         def on_data(combined):
+            lines = combined.splitlines()
+            # Early exit if parser knows response is complete (RAILtest single response)
+            if self.parser.is_response_complete(lines):
+                response.append(combined)
+                event.set()
+                return
             if prompt in combined:
                 response.append(combined)
                 event.set()

@@ -345,9 +345,26 @@ body {
 .tm-block-resp.expanded .tm-response { display: block; }
 
 /* dot colors */
-.tm-dot-cmd   { border-color: #185FA5; background: #EFF2F9; }
-.tm-dot-event { border-color: #EF9F27; background: #EFF2F9; }
+.tm-dot-cmd    { border-color: #185FA5; background: #EFF2F9; }
+.tm-dot-event  { border-color: #EF9F27; background: #EFF2F9; }
 .tm-dot-status { border-color: #1D9E75; background: #1D9E75; }
+
+/* Timeline icon — replaces empty circle dot for group/event entries */
+.tm-dot-icon {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1; flex-shrink: 0;
+}
+
+/* Group block header background by color category */
+.tm-block-event.color-boot   .tm-block-header,
+.tm-block-event.color-script .tm-block-header { background: #DBEAFE; }
+.tm-block-event.color-error  .tm-block-header { background: #FEE2E2; }
+.tm-block-event.color-warning .tm-block-header { background: #FEF3C7; }
+.tm-block-event.color-success .tm-block-header { background: #D1FAE5; }
+.tm-block-event.color-boot   .tm-detail,
+.tm-block-event.color-script .tm-detail { background: #EFF6FF; }
+.tm-block-event.color-error  .tm-detail { background: #FEF2F2; }
 
 /* view toggle button */
 .term-view-toggle {
@@ -539,6 +556,7 @@ body {
 <script>
 const serial    = location.pathname.split("/").filter(p => p.length > 0).pop();
 const socket    = io();
+
 socket.on("connect", () => {
     console.log("socket connected:", socket.id);
 });
@@ -737,20 +755,16 @@ socket.on("terminal_ready", ({ room }) => {
     mvAddStatus(kind, "Connected");
 });
 
-socket.on("terminal_output", ({ data, room }) => {
+socket.on("terminal_output", ({ data, room, groups }) => {
     const kind = room.split("_").pop();
     terminals[kind]?.term.write(data);
+    // Always feed raw data to mvFeed for response/prompt detection
+    // Groups provide the pretty display cache for events
+    if (modernMode && groups && groups.length > 0) {
+        mvGroupCache[kind] = mvGroupCache[kind] || [];
+        mvGroupCache[kind].push(...groups);
+    }
     mvFeed(kind, data);
-});
-
-socket.on("terminal_cmd", ({ data, room }) => {
-    const kind = room.split("_").pop();
-    const st = mvState[kind];
-    if (!modernMode) return;
-    // Flush any pending event burst before opening a new command
-    if (st.eventTimer) { clearTimeout(st.eventTimer); mvFlushEvent(kind); }
-    if (st.pending) { mvCloseCmd(kind, st.pending); }
-    st.pending = { cmd: data.trim(), response: "", ts: mvTime() };
 });
 
 socket.on("terminal_closed", ({ room }) => {
@@ -919,9 +933,14 @@ var modernMode = {{ 'true' if terminal_mode == 'modern' else 'false' }};
 
 // Per-channel parser state
 var mvState = {
-    vcom:  { pending: null, buffer: "", eventBuf: [], eventTimer: null },
-    admin: { pending: null, buffer: "", eventBuf: [], eventTimer: null }
+    vcom:  { pending: null, buffer: "", promptTimer: null, lastEventEl: null },
+    admin: { pending: null, buffer: "", promptTimer: null, lastEventEl: null }
 };
+
+// Server-parsed groups cache (populated before mvFeed, matched at prompt)
+var mvGroupCache = { vcom: [], admin: [] };
+// RT event lines buffered until prompt, replaced by group or flushed as-is
+var mvEventBuf   = { vcom: [], admin: [] };
 
 function applyView() {
     if (modernMode) {
@@ -968,41 +987,165 @@ function mvProcessLine(kind, line) {
     const clean = line.trim();
     if (!clean) return;
 
-    const isPrompt = /^[^{]*>\s*$/.test(clean);   // ends with ">" — prompt line (WSTK>, TK>, >…)
-    const isCmd    = /^>\s+\S/.test(clean);        // "> something" = echoed command (VCOM only)
+    const isPrompt    = /^[^{]*>\s*$/.test(clean);
+    const isCmd       = /^>\s+\S/.test(clean) && !/^>\s*\{/.test(clean);
+    const rtMatch     = clean.match(/\{\{(\([^)]+\))/);
+    const rtName      = rtMatch ? rtMatch[1].slice(1, -1) : null;
+    const pendingBase = st.pending ? st.pending.cmd.split(/\s+/)[0] : null;
+    const isRTResp    = rtName !== null && pendingBase !== null && rtName === pendingBase;
+    const isRTEvent   = rtName !== null && !isRTResp;
+    const rtComplete  = /\}\}\s*$/.test(clean);
+    // Payload: starts with { but no (cmd), ends with }}
+    const isPayload   = !rtName && /^\{[^(]/.test(clean) && rtComplete && !st.pending;
 
+    // ── Prompt ──────────────────────────────────────────────────────────────
     if (isPrompt) {
-        // Prompt received — close pending command (response complete)
+        const cache = mvGroupCache[kind];
+        const eBuf  = mvEventBuf[kind];
+
+        // For each buffered raw event line, find a matching group or display raw
+        if (eBuf.length > 0) {
+            // Collect groups that cover the buffered lines
+            const usedIdx = new Set();
+            for (const ev of eBuf) {
+                let matched = null;
+                if (cache) {
+                    const idx = cache.findIndex((gr, i) => !usedIdx.has(i) &&
+                        ((gr.cmd && ev.raw.includes("(" + gr.cmd + ")")) ||
+                         (gr.raw && gr.raw.some(r => r.trim().startsWith(ev.raw.slice(0, 20)))))
+                    );
+                    if (idx >= 0) { matched = cache[idx]; usedIdx.add(idx); }
+                }
+                if (matched) {
+                    mvAddGroup(kind, matched);
+                } else {
+                    mvAddEvent(kind, ev.raw.replace(/^>\s+/, ""));
+                }
+            }
+            // Remove used groups from cache
+            const usedArr = Array.from(usedIdx).sort((a,b) => b-a);
+            for (const i of usedArr) cache.splice(i, 1);
+            mvEventBuf[kind] = [];
+        }
+
+        // Any remaining groups in cache (e.g. boot, multi-response)
+        if (cache && cache.length > 0) {
+            for (const g of cache.splice(0)) {
+                mvDispatchGroup(kind, g);
+            }
+        }
+
         if (st.pending) {
-            mvCloseCmd(kind, st.pending);
-            st.pending = null;
+            if (st.promptTimer) clearTimeout(st.promptTimer);
+            st.promptTimer = setTimeout(function() {
+                st.promptTimer = null;
+                if (st.pending) { mvCloseCmd(kind, st.pending); st.pending = null; }
+            }, 150);
         }
         return;
     }
 
+    // Cancel prompt-close timer if non-event data arrives (pagination)
+    if (st.promptTimer && !isRTEvent) {
+        clearTimeout(st.promptTimer);
+        st.promptTimer = null;
+    }
+
+    // ── Echoed command ───────────────────────────────────────────────────────
     if (isCmd) {
-        // Echoed command — start a new command block
         const cmd = clean.replace(/^>\s+/, "");
-        // If terminal_cmd already opened this block, just skip the echo
         if (st.pending && st.pending.cmd === cmd) return;
         if (st.pending) { mvCloseCmd(kind, st.pending); }
         st.pending = { cmd, response: "", ts: mvTime() };
+        st.lastEventEl = null;
         return;
     }
 
-    // Everything else:
+    // ── RAILtest complete line (event or response) ───────────────────────────
+    if ((isRTEvent || isRTResp || isPayload) && rtComplete) {
+        // Find matching group in cache by raw line content
+        const cache = mvGroupCache[kind];
+        let g = null;
+        if (cache && cache.length > 0) {
+            // Match: find first group whose cmd matches rtName, or whose raw line matches
+            const stripped = clean.replace(/^>\s+/, "");
+            const idx = cache.findIndex(gr => {
+                // Match by cmd name (most reliable — works even with fragmented lines)
+                if (rtName && gr.cmd === rtName) return true;
+                // Fallback: raw line content match
+                return gr.raw && gr.raw.some(r => {
+                    const rt = r.trim();
+                    return rt === clean || rt === stripped || rt.startsWith(stripped.slice(0, 20));
+                });
+            });
+            if (idx >= 0) {
+                g = cache.splice(idx, 1)[0];
+            }
+        }
+
+        if (isRTEvent) {
+            // Close pending if open (spontaneous event interrupts command)
+            if (st.pending) {
+                if (st.promptTimer) { clearTimeout(st.promptTimer); st.promptTimer = null; }
+                mvCloseCmd(kind, st.pending);
+                st.pending = null;
+            }
+            if (g) {
+                // Group matched immediately (e.g. rxPacket) — display now
+                mvAddGroup(kind, g);
+            } else {
+                // No group yet — buffer until prompt (boot group arrives at prompt)
+                mvEventBuf[kind].push({ raw: clean, ts: mvTime() });
+            }
+            return;
+        }
+
+        if (isRTResp) {
+            // Response line — add to pending
+            const displayVal = g ? g.summary : clean;
+            if (st.pending) {
+                if (clean === st.pending.cmd) return;
+                st.pending.response += (st.pending.response ? "\n" : "") + displayVal;
+                // Single response complete — close immediately
+                mvCloseCmd(kind, st.pending);
+                st.pending = null;
+            }
+            return;
+        }
+
+        if (isPayload) {
+            // Payload bytes — attach to last event (rxPacket)
+            if (st.lastEventEl) {
+                const payloadText = g ? g.detail || g.summary : clean;
+                const detail = st.lastEventEl.querySelector(".tm-detail");
+                const header = st.lastEventEl.querySelector(".tm-block-header");
+                if (detail) {
+                    detail.textContent += "\n" + payloadText;
+                } else {
+                    st.lastEventEl.classList.remove("single");
+                    const id = st.lastEventEl.id;
+                    st.lastEventEl.setAttribute("onclick", `tmToggle('${id}','event')`);
+                    const arrow = document.createElement("span");
+                    arrow.className = "tm-arrow";
+                    arrow.textContent = "\u25B6";
+                    header.appendChild(arrow);
+                    const d = document.createElement("div");
+                    d.className = "tm-detail";
+                    d.textContent = header.querySelector(".tm-summary").textContent + "\n" + payloadText;
+                    st.lastEventEl.appendChild(d);
+                }
+                mvGetContainer(kind).scrollTop = mvGetContainer(kind).scrollHeight;
+            }
+            return;
+        }
+    }
+
+    // ── Plain text / unknown ─────────────────────────────────────────────────
     if (st.pending) {
-        // Ignore echo: line identical to the command sent (board echoes it back)
         if (clean === st.pending.cmd) return;
-        // We're waiting for the prompt → this is part of the response
         st.pending.response += (st.pending.response ? "\n" : "") + clean;
     } else {
-        // No pending command → spontaneous event — accumulate for 500ms of silence
-        st.eventBuf.push(clean);
-        if (st.eventTimer) clearTimeout(st.eventTimer);
-        st.eventTimer = setTimeout(function() {
-            mvFlushEvent(kind);
-        }, 500);
+        mvAddEvent(kind, clean);
     }
 }
 
@@ -1075,41 +1218,38 @@ function mvCloseCmd(kind, pending) {
     }
 
     c.scrollTop = c.scrollHeight;
-}
 
-function mvFlushEvent(kind) {
-    const st = mvState[kind];
-    if (!st.eventBuf.length) return;
-    const text = st.eventBuf.join("\n");
-    st.eventBuf = [];
-    st.eventTimer = null;
-    mvAddEvent(kind, text);
+    // If a next command was queued while this one was waiting for response, open it now
+    if (pending._nextCmd) {
+        mvState[kind].pending = { cmd: pending._nextCmd, response: "", ts: mvTime() };
+    }
 }
 
 function mvAddEvent(kind, text) {
+    // Script events are handled via terminal_script_event — skip plain text duplicates
+    if (/^[▶✓✗]/.test(text.trim())) return;
     const c  = mvGetContainer(kind);
     const id = "tme_" + Date.now() + Math.random().toString(36).slice(2);
-    // Parse first {{key}} for summary
-    const match = text.match(/\{\{([^}]+)\}\}/);
-    const firstLine = text.split("\n")[0];
-    const summary = match ? match[1] : firstLine.substring(0, 60);
-    const multiLine = text.trim().split("\n").length > 1 || text.trim().length > summary.length + 4;
+    const lines = text.trim().split("\n");
+    const summary = lines[0];
+    const multiLine = lines.length > 1;
 
     const e = document.createElement("div");
     e.className = "tm-entry";
     e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot tm-dot-event"></div><div class="tm-line"></div></div>
+        <div class="tm-spine"><div class="tm-dot-icon">⚡</div><div class="tm-line"></div></div>
         <div class="tm-time">${mvTime()}</div>
         <div class="tm-block tm-block-event${multiLine ? "" : " single"}" id="${id}"
              onclick="${multiLine ? `tmToggle('${id}', 'event')` : ''}">
             <div class="tm-block-header">
-                <span class="tm-icon">⚡</span>
                 <span class="tm-summary" title="${esc2(text)}">${esc2(summary)}</span>
                 ${multiLine ? '<span class="tm-arrow">▶</span>' : ''}
             </div>
             ${multiLine ? `<div class="tm-detail">${esc2(text)}</div>` : ''}
         </div>`;
     c.appendChild(e);
+    // Store reference for potential payload attachment
+    mvState[kind].lastEventEl = e.querySelector(".tm-block-event");
     c.scrollTop = c.scrollHeight;
 }
 
@@ -1125,6 +1265,119 @@ function esc2(s) {
     return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 {% endraw %}
+
+// ── Group rendering (server-parsed, called from terminal_output handler) ─────
+// mvProcessGroup removed — groups consumed via mvGroupCache in mvProcessLine
+
+// Dispatch a group that arrived at prompt flush (no raw line to consume it)
+function mvDispatchGroup(kind, g) {
+    const st = mvState[kind];
+    // Boot groups are always events, never responses to commands
+    if (g.type === "boot") {
+        mvAddGroup(kind, g);
+        return;
+    }
+    if (st.pending) {
+        const text = g.summary + (g.detail ? "\n" + g.detail : "");
+        st.pending.response += (st.pending.response ? "\n" : "") + text;
+        mvCloseCmd(kind, st.pending);
+        st.pending = null;
+    } else {
+        mvAddGroup(kind, g);
+    }
+}
+
+// Track boot DOM elements by boot_id for incremental updates
+var mvBootEls = {};
+
+function mvAddGroup(kind, g) {
+    const c = mvGetContainer(kind);
+
+    // Boot update: same boot_id already rendered — update detail only
+    if (g.type === "boot" && g.boot_id && !g.boot_first) {
+        const existing = mvBootEls[g.boot_id];
+        if (existing) {
+            const detailEl = existing.querySelector(".tm-detail");
+            if (detailEl && g.detail) {
+                detailEl.textContent = g.detail;
+            }
+            c.scrollTop = c.scrollHeight;
+            return;
+        }
+    }
+
+    const id      = "tmg_" + Date.now() + Math.random().toString(36).slice(2);
+    const color   = g.color && g.color !== "default" ? g.color : null;
+    const blkCls  = color ? ` color-${color}` : "";
+    const multi   = !!g.detail;
+    // Pick timeline icon based on type/category/color
+    const icon = g.type === "boot"                         ? "↺"
+               : g.category === "rx"                       ? "↓"
+               : g.category === "tx" && g.color==="success"? "✓"
+               : g.category === "tx" && g.color==="error"  ? "✗"
+               : g.category === "tx"                       ? "↑"
+               : g.category === "script" && g.summary && g.summary.startsWith("▶") ? "▶"
+               : g.category === "script"                   ? "✓"
+               : g.color === "error"                       ? "✗"
+               : g.color === "warning"                     ? "⚠"
+               : "⚡";
+
+    const e = document.createElement("div");
+    e.className = "tm-entry";
+    e.innerHTML = `
+        <div class="tm-spine"><div class="tm-dot-icon">${icon}</div><div class="tm-line"></div></div>
+        <div class="tm-time">${mvTime()}</div>
+        <div class="tm-block tm-block-event${blkCls}${multi ? "" : " single"}" id="${id}"
+             onclick="${multi ? `tmToggle('${id}','event')` : ''}">
+            <div class="tm-block-header">
+                <span class="tm-summary" title="${esc2(g.summary)}">${esc2(g.summary)}</span>
+                ${multi ? '<span class="tm-arrow">▶</span>' : ''}
+            </div>
+            ${multi ? `<div class="tm-detail">${esc2(g.detail)}</div>` : ''}
+        </div>`;
+    c.appendChild(e);
+    const blkEl = e.querySelector(".tm-block-event");
+    mvState[kind].lastEventEl = blkEl;
+
+    // Register boot element for future updates
+    if (g.type === "boot" && g.boot_id) {
+        mvBootEls[g.boot_id] = blkEl;
+    }
+
+    c.scrollTop = c.scrollHeight;
+}
+
+socket.on("terminal_script_event", ({ room, group }) => {
+    const kind = room.split("_").pop();
+    if (!modernMode) return;
+    // Remove any raw text duplicate already displayed by mvAddEvent
+    const c = mvGetContainer(kind);
+    const existing = Array.from(c.querySelectorAll(".tm-summary")).find(
+        el => el.textContent.trim() === group.summary.trim()
+    );
+    if (existing) {
+        const entry = existing.closest(".tm-entry");
+        if (entry) entry.remove();
+    }
+    mvAddGroup(kind, group);
+});
+socket.on("terminal_cmd", ({ data, room }) => {
+    console.log("[terminal_cmd]", room, JSON.stringify(data));
+    const kind = room.split("_").pop();
+    const st = mvState[kind];
+    if (!modernMode) return;
+    // If a pending exists with no response yet, close it only if it has content
+    // Otherwise queue the new cmd — it will open after the current response closes
+    if (st.pending && st.pending.response) {
+        mvCloseCmd(kind, st.pending);
+        st.pending = null;
+    } else if (st.pending) {
+        // Previous cmd has no response yet — store new cmd to open after
+        st.pending._nextCmd = data.trim();
+        return;
+    }
+    st.pending = { cmd: data.trim(), response: "", ts: mvTime() };
+});
 </script>
 </body>
 </html>
