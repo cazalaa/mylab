@@ -468,12 +468,15 @@ def terminal_run_script():
         colors = {"green": "\x1b[32m", "red": "\x1b[31m", "yellow": "\x1b[33m", "default": "\x1b[0m"}
         prefix = colors.get(color, "\x1b[0m")
         socketio.emit("terminal_output", {"data": f"{prefix}{msg}\x1b[0m\r\n", "room": room}, room=room)
-        # Also emit as a structured group for Modern View
+        if not TERMINAL_PRETTY: return
         color_map = {"green": "script", "red": "error", "yellow": "script", "default": "default"}
-        from parsers import make_group
-        g = make_group(type_="event", summary=msg, category="script",
-                       color=color_map.get(color, "default"))
-        socketio.emit("terminal_script_event", {"room": room, "group": g}, room=room)
+        import uuid as _uuid
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        socketio.emit("terminal_line", {
+            "role": "script", "display": msg, "color": color_map.get(color, "default"),
+            "group_id": _uuid.uuid4().hex[:12], "room": room, "ts": ts,
+            "detail": None, "cmd": None, "boot_id": None, "boot_first": False,
+        }, room=room)
 
     def run():
         emit_out(f"Running {os.path.basename(script_path)}", "yellow")
@@ -581,28 +584,43 @@ active_telnets = {}   # room_id -> socket
 active_boards  = {}   # room_id -> current Board instance (updated each run)
 _room_parsers  = {}   # room_id -> BaseParser (for interactive terminal pretty display)
 
-def _extract_groups(text: str, line_buf: list, parser) -> list:
+def _extract_lines(text: str, line_buf: list, parser,
+                   session_log=None, stream="VCOM") -> list:
     """
-    Accumulate raw TCP fragments into complete lines, feed each to the parser,
-    and return a list of Group dicts ready for display.
-
-    line_buf[0] holds the current incomplete line fragment across calls.
+    Accumulate TCP fragments into complete lines.
+    Feed each line to the parser → ParsedLine dicts.
+    Write complete lines to session_log if provided.
+    Returns list of ParsedLine dicts.
     """
-    combined  = line_buf[0] + text
-    combined  = combined.replace("\r\n", "\n").replace("\r", "\n")
-    parts     = combined.split("\n")
-    line_buf[0] = parts[-1]          # keep trailing fragment for next call
-    complete  = parts[:-1]
+    combined    = line_buf[0] + text
+    combined    = combined.replace("\r\n", "\n").replace("\r", "\n")
+    parts       = combined.split("\n")
+    line_buf[0] = parts[-1]
+    complete    = parts[:-1]
 
-    groups = []
+    parsed_lines = []
+    log_lines    = []
+
     for raw_line in complete:
         line = raw_line.strip()
         if not line:
             continue
-        # Strip any prompt-prefix artifact ("> ") before a {{ line
+        if session_log:
+            log_lines.append(line)
+        # Strip prompt prefix artifact before a {{ line ("> {{(appMode)...")
         parse_line = re.sub(r'^>\s+(?=\{\{)', '', line)
-        groups.extend(parser.feed(parse_line))
-    return groups
+        try:
+            parsed_lines.extend(parser.feed(parse_line))
+        except Exception as _pe:
+            print(f"[PARSER] error on {line!r}: {_pe}")
+
+    if session_log and log_lines:
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        with open(session_log, "a") as f:
+            for line in log_lines:
+                f.write(f"[{ts}][{stream}] {line}\n")
+
+    return parsed_lines
 
 
 @socketio.on("connect_telnet")
@@ -627,9 +645,42 @@ def handle_connect_telnet(data):
 
         active_telnets[room] = tn
 
+        # Send a CRLF on VCOM connection — board replies with prompt,
+        # which primes the AutoParser to detect RAILtest before first manual command
+        if room.endswith("_vcom"):
+            try:
+                tn.sendall(b"\r\n")
+            except Exception:
+                pass
+
         # Per-room parser and line buffer for pretty display
         _room_parsers[room] = get_parser(TERMINAL_PARSER)
-        parse_line_buf = [""]   # line fragment accumulator for pretty
+        parse_line_buf    = [""]   # line fragment accumulator
+        _current_group_id = [None] # current cmd group_id (mutable ref)
+
+        def _check_manual_echo(line: str) -> str | None:
+            """If line matches a pending manual command, pop and return it."""
+            pending = _room_parsers.get(f"{room}_pending_cmds")
+            if not pending:
+                return None
+            clean = line.strip().lstrip(">").strip()
+            for i, cmd in enumerate(pending):
+                if clean == cmd:
+                    pending.pop(i)
+                    return cmd
+            return None
+
+        # Session log — one file per terminal connection (vcom only, captures both channels)
+        serial_id = room.split("_")[0]
+        is_vcom   = room.endswith("_vcom")
+        session_log = None
+        log_line_buf = [""]   # line fragment accumulator for clean log lines
+        if is_vcom:
+            session_log = get_log_file(serial_id)
+            with open(session_log, "a") as f:
+                f.write(f"# Session started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"# Board: {serial_id}  Host: {host}  Port: {port}\n")
+            _room_parsers[f"{serial_id}_session_log"] = session_log
 
         def reader():
             print(f"[TELNET] reader started: {room}")
@@ -643,15 +694,54 @@ def handle_connect_telnet(data):
                         print(f"[TELNET] empty chunk, closing: {room}")
                         break
                     text = chunk.decode("utf-8", errors="replace")
-                    groups = []
+                    # Always emit raw data for xterm (Classic mode)
+                    socketio.emit("terminal_output",
+                                  {"data": text, "room": room},
+                                  room=room)
+                    # Parse lines and emit terminal_line events for Modern mode
                     if room_parser and TERMINAL_PRETTY:
                         try:
-                            groups = _extract_groups(text, parse_line_buf, room_parser)
+                            stream = "VCOM" if is_vcom else "ADMIN"
+                            parsed = _extract_lines(text, parse_line_buf, room_parser,
+                                                    session_log=session_log, stream=stream)
+                            for pl in parsed:
+                                role = pl.get("role","unknown")
+                                if role == "prompt":
+                                    _current_group_id[0] = None
+                                    # Clear stale pending manual commands
+                                    pending = _room_parsers.get(f"{room}_pending_cmds")
+                                    if pending:
+                                        pending.clear()
+                                    continue
+                                if role == "unknown":
+                                    # Could be a manual command echo not yet recognised
+                                    matched = _check_manual_echo(pl["raw"])
+                                    if matched:
+                                        pl["role"] = "cmd"
+                                        pl["display"] = matched
+                                        role = "cmd"
+                                    else:
+                                        continue
+                                # Check if this is a manual command echo
+                                if role == "cmd":
+                                    matched = _check_manual_echo(pl["raw"])
+                                    if matched:
+                                        pl["display"] = matched  # use exact cmd as typed
+                                # Assign group_id
+                                if role == "cmd":
+                                    import uuid as _uuid
+                                    _current_group_id[0] = _uuid.uuid4().hex[:12]
+                                    pl["group_id"] = _current_group_id[0]
+                                elif role in ("response", "event") and _current_group_id[0]:
+                                    pl["group_id"] = _current_group_id[0]
+                                    if role == "response":
+                                        _current_group_id[0] = None  # response closes group
+                                elif role == "boot":
+                                    pl["group_id"] = pl.get("boot_id")
+                                ts_now = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                                socketio.emit("terminal_line", {**pl, "room": room, "ts": ts_now}, room=room)
                         except Exception as _pe:
                             print(f"[PARSER] error: {_pe}")
-                    socketio.emit("terminal_output",
-                                  {"data": text, "room": room, "groups": groups},
-                                  room=room)
                     # Dispatch to board listeners (for script execution)
                     board = active_boards.get(room)
                     if board:
@@ -667,6 +757,15 @@ def handle_connect_telnet(data):
                 except Exception as e:
                     print(f"[TELNET] reader error: {room}: {e}")
                     break
+            if session_log:
+                # Flush any remaining fragment in parse_line_buf
+                if parse_line_buf[0].strip():
+                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                    stream = "VCOM" if is_vcom else "ADMIN"
+                    with open(session_log, "a") as f:
+                        f.write(f"[{ts}][{stream}] {parse_line_buf[0].strip()}\n")
+                with open(session_log, "a") as f:
+                    f.write(f"# Session ended: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             socketio.emit("terminal_closed", {"room": room}, room=room)
             active_telnets.pop(room, None)
             _room_parsers.pop(room, None)
@@ -734,18 +833,36 @@ def handle_terminal_input(data):
                 tn.sendall(data["data"].encode("utf-8"))
             else:
                 tn.write(data["data"].encode("utf-8"))
-            # For admin channels: accumulate and emit terminal_cmd on Enter
-            if not room.endswith("_vcom"):
-                sid = request.sid
-                raw = data["data"]
-                if raw in ("\r", "\n", "\r\n"):
-                    cmd = _admin_input_buf.pop(sid, "").strip()
-                    if cmd:
+            # Log manual commands to session log
+            serial_id = room.split("_")[0]
+            is_vcom   = room.endswith("_vcom")
+            stream    = "VCOM" if is_vcom else "ADMIN"
+            log_path  = _room_parsers.get(f"{serial_id}_session_log")
+            cmd_text  = data["data"].replace("\r\n","").replace("\r","").replace("\n","").strip()
+            if log_path and cmd_text and cmd_text not in ("\x7f", "\x08"):
+                ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                with open(log_path, "a") as f:
+                    f.write(f"[{ts}][{stream}][CMD] {cmd_text}\n")
+            # Accumulate keystrokes for admin display
+            sid = request.sid
+            raw = data["data"]
+            key = f"{room}_{sid}"
+            if raw in ("\r", "\n", "\r\n"):
+                cmd = _admin_input_buf.pop(key, "").strip()
+                if cmd:
+                    if is_vcom:
+                        # Store expected echo so reader emits terminal_line(cmd)
+                        pending = _room_parsers.get(f"{room}_pending_cmds")
+                        if pending is None:
+                            pending = []
+                            _room_parsers[f"{room}_pending_cmds"] = pending
+                        pending.append(cmd)
+                    else:
                         socketio.emit("terminal_cmd", {"data": cmd, "room": room}, room=room)
-                elif raw == "\x7f" or raw == "\x08":  # backspace
-                    _admin_input_buf[sid] = _admin_input_buf.get(sid, "")[:-1]
-                else:
-                    _admin_input_buf[sid] = _admin_input_buf.get(sid, "") + raw
+            elif raw in ("\x7f", "\x08"):
+                _admin_input_buf[key] = _admin_input_buf.get(key, "")[:-1]
+            else:
+                _admin_input_buf[key] = _admin_input_buf.get(key, "") + raw
         except Exception as e:
             emit("terminal_error", {"message": str(e)})
 
@@ -1610,31 +1727,19 @@ class Board:
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[CLI] {self.nickname or self.serial} {ts} >>> {cmd}")
 
-        # Register listener BEFORE sending to avoid missing fast responses
         event    = threading.Event()
         response = []
         prompt   = self._vcom_prompt
 
         def on_data(combined):
             lines = combined.splitlines()
-            # Early exit if parser knows response is complete (RAILtest single response)
             if self.parser.is_response_complete(lines):
-                response.append(combined)
-                event.set()
-                return
+                response.append(combined); event.set(); return
             if prompt in combined:
-                response.append(combined)
-                event.set()
+                response.append(combined); event.set()
 
         self._vcom_listeners.append(on_data)
-
         payload = cmd.encode("utf-8") + self._vcom_le
-        if self._vcom_echo and hasattr(self, '_vcom_expecting_echo'):
-            self._vcom_expecting_echo[0] = True
-        vcom_room = f"{self.serial}_vcom"
-        socketio.emit("terminal_cmd",
-                      {"data": cmd.strip(), "room": vcom_room},
-                      room=vcom_room)
         self._vcom_sock.sendall(payload)
 
         event.wait(timeout=timeout)
