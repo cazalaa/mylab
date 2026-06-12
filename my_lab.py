@@ -867,6 +867,47 @@ def handle_terminal_input(data):
             emit("terminal_error", {"message": str(e)})
 
 
+@app.route("/api/adapter/<serial>/erase", methods=["POST"])
+def adapter_erase(serial):
+    """Mass erase a single board from Manual Control."""
+    try:
+        data   = get_connections(serial)
+        adapter = data.get("adapter", {})
+        conn_type = adapter.get("connectivityType", "usb")
+        if conn_type == "usb":
+            conn_flag = ["--serialno", serial]
+        else:
+            conn_flag = ["--ip", adapter.get("host", "")]
+        cmd = [COMMANDER_PATH, "device", "masserase"] + conn_flag
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        ok = result.returncode == 0
+        return jsonify({"ok": ok, "msg": result.stderr.strip() if not ok else ""})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/adapter/<serial>/flash", methods=["POST"])
+def adapter_flash(serial):
+    """Flash a firmware file onto a single board from Manual Control."""
+    path = request.json.get("path", "")
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "file not found"}), 400
+    try:
+        data   = get_connections(serial)
+        adapter = data.get("adapter", {})
+        conn_type = adapter.get("connectivityType", "usb")
+        if conn_type == "usb":
+            conn_flag = ["--serialno", serial]
+        else:
+            conn_flag = ["--ip", adapter.get("host", "")]
+        cmd = [COMMANDER_PATH, "flash", path] + conn_flag
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        ok = result.returncode == 0
+        return jsonify({"ok": ok, "msg": result.stderr.strip() if not ok else ""})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/adapter/<serial>/admin-cmd", methods=["POST"])
 def admin_cmd(serial):
     cmd  = request.json.get("cmd", "")

@@ -265,7 +265,18 @@ body {
 
 .test-btn-hidden { visibility: hidden; }
 
-button {
+.test-fw-label {
+    font-size: 10px;
+    color: #8899aa;
+    text-align: center;
+    width: 100%;
+    min-height: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 4px;
+    margin-top: -4px;
+}
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 12px;
     font-weight: 500;

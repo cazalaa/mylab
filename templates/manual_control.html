@@ -153,6 +153,11 @@ function renderTestCards(adapters) {
             </div>
             <div class="test-card-buttons">
                 <div class="test-btn-row">
+                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onErase(this)">Erase</button>
+                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onFlashClick(this)">Flash</button>
+                </div>
+                <div class="test-fw-label" id="fw_${a.serialNumber}"></div>
+                <div class="test-btn-row">
                     <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onCli(this)">Cli</button>
                     <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onReset(this)">Reset</button>
                 </div>
@@ -195,6 +200,94 @@ async function onCli(btn) {
         btn.innerText = label;
         btn.disabled  = false;
     }, 2000);
+}
+
+// Last flashed firmware per serial: { serial: path }
+const _lastFirmware = {};
+const _flashClickTimers = {};
+
+function onFlashClick(btn) {
+    const serial = btn.dataset.serial;
+    if (_flashClickTimers[serial]) {
+        clearTimeout(_flashClickTimers[serial]);
+        delete _flashClickTimers[serial];
+        const path = _lastFirmware[serial];
+        if (path) { _doFlash(btn, serial, path); }
+        else      { onFlash(btn); }
+        return;
+    }
+    _flashClickTimers[serial] = setTimeout(() => {
+        delete _flashClickTimers[serial];
+        onFlash(btn);
+    }, 250);
+}
+
+async function onErase(btn) {
+    const serial = btn.dataset.serial;
+    const label  = btn.innerText;
+    btn.innerText = "…";
+    btn.disabled  = true;
+    try {
+        const res  = await fetch(`/api/adapter/${serial}/erase`, { method: "POST" });
+        const data = await res.json();
+        btn.innerText = data.ok ? "✓" : "✗";
+        btn.classList.add(data.ok ? "success" : "error");
+    } catch(e) {
+        btn.innerText = "✗";
+        btn.classList.add("error");
+    }
+    setTimeout(() => {
+        btn.classList.remove("success", "error");
+        btn.innerText = label;
+        btn.disabled  = false;
+    }, 2000);
+}
+
+async function onFlash(btn) {
+    const serial = btn.dataset.serial;
+    // Pick file via pywebview or fallback input
+    let path = null;
+    if (window.pywebview) {
+        const result = await window.pywebview.api.pick_file(
+            "", ["Firmware files (*.hex;*.s37)"]
+        );
+        if (!result) return;
+        path = result;
+    } else {
+        // Browser fallback — not supported without pywebview
+        alert("File picker requires the desktop app.");
+        return;
+    }
+    _lastFirmware[serial] = path;
+    // Show truncated filename under the button
+    const fname = path.split("/").pop().split("\\").pop();
+    const lbl = document.getElementById(`fw_${serial}`);
+    if (lbl) lbl.textContent = fname;
+    await _doFlash(btn, serial, path);
+}
+
+async function _doFlash(btn, serial, path) {
+    const label  = btn.innerText;
+    btn.innerText = "…";
+    btn.disabled  = true;
+    try {
+        const res  = await fetch(`/api/adapter/${serial}/flash`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path })
+        });
+        const data = await res.json();
+        btn.innerText = data.ok ? "✓" : "✗";
+        btn.classList.add(data.ok ? "success" : "error");
+    } catch(e) {
+        btn.innerText = "✗";
+        btn.classList.add("error");
+    }
+    setTimeout(() => {
+        btn.classList.remove("success", "error");
+        btn.innerText = label;
+        btn.disabled  = false;
+    }, 3000);
 }
 
 async function onReset(btn) {
