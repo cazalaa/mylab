@@ -20,7 +20,6 @@
         </div>
     </div>
     <div class="topbar-actions">
-        <button id="btnSdm"         onclick="launchSdm()"       >SDM</button>
         <button id="btnMaintenance" onclick="togglePage('maintenance')" data-icon="Maintenance">Maintenance</button>
         <button id="btnManualControl" onclick="togglePage('manual_control')" data-icon="Manual Control">Manual Control</button>
         <button id="btnScriptControl" onclick="togglePage('script_control')" data-icon="Scenario Control">Scenario Control</button>
@@ -41,25 +40,6 @@ async function refreshCache() {
     const res = await fetch('/adapters');
     window.appState.cache = await res.json();
 }
-async function launchSdm() {
-    const btn  = document.getElementById("btnSdm");
-    const icon = btn.innerText;
-    btn.innerText = "…";
-    btn.disabled = true;
-
-    const res = await fetch("/sdm/ui", { method: "POST" });
-    const data = await res.json();
-
-    btn.innerText = data.ok ? "✓" : "✕";
-    btn.classList.add(data.ok ? "success" : "error");
-
-    setTimeout(() => {
-        btn.classList.remove("success", "error");
-        btn.innerText = icon;
-        btn.disabled = false;
-    }, 3000);
-}
-
 const loadedPages = new Set();
 
 async function togglePage(name) {
