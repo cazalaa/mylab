@@ -1829,6 +1829,94 @@ class Board:
         time.sleep(1.0)
         return result
 
+    def flash(self, firmware_path: str, serial: str = None, ip: str = None,
+              masserase: bool = True, halt_reset: bool = False) -> bool:
+        """
+        Flash a firmware file onto the board using Simplicity Commander.
+
+        Connection is auto-detected from board.host:
+          - host is 127.0.0.1/localhost → USB, uses board serial  (-s <serial>)
+          - host is a remote IP         → JLink over IP            (--ip <host>)
+
+        Override with:
+            serial="XXXXXXX"   → force -s <serial>
+            ip="192.168.1.x"   → force --ip <ip>
+
+        Args:
+            firmware_path : path to .hex / .s37 file
+            serial        : force a specific serial number (optional)
+            ip            : force a specific JLink IP (optional)
+            masserase     : mass erase before flash (default True)
+            halt_reset    : keep CPU halted after flash (default False)
+
+        Returns:
+            True on success, False on failure
+
+        Examples:
+            board.flash("/fw/app.hex")
+            board.flash("/fw/app.hex", serial="440012345")
+            board.flash("/fw/app.hex", ip="192.168.1.100")
+            board.flash("/fw/app.hex", masserase=False)
+        """
+        import os as _os
+        firmware_path = _os.path.abspath(firmware_path)
+        if not _os.path.isfile(firmware_path):
+            print(f"[FLASH] ERROR: file not found: {firmware_path}")
+            return False
+
+        # Resolve connection flag
+        if serial:
+            conn_flag = ["-s", serial]
+        elif ip:
+            conn_flag = ["--ip", ip]
+        elif self.host in ("127.0.0.1", "localhost", "::1"):
+            conn_flag = ["-s", self.serial]
+        else:
+            conn_flag = ["--ip", self.host]
+
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[FLASH] {self.nickname or self.serial} {ts} {firmware_path} conn={conn_flag}")
+
+        vcom_room = f"{self.serial}_vcom"
+
+        def _emit(msg):
+            print(f"[FLASH] {msg}")
+            socketio.emit("terminal_line", {
+                "role": "script", "display": msg, "color": "script",
+                "group_id": __import__("uuid").uuid4().hex[:12],
+                "room": vcom_room, "ts": datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3],
+                "detail": None, "cmd": None, "boot_id": None, "boot_first": False,
+            }, room=vcom_room)
+
+        def _run(cmd):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if r.returncode != 0:
+                    _emit(f"Flash error: {r.stderr.strip() or r.stdout.strip()}")
+                    return False
+                return True
+            except subprocess.TimeoutExpired:
+                _emit("Flash timeout after 120s")
+                return False
+            except Exception as e:
+                _emit(f"Flash exception: {e}")
+                return False
+
+        if masserase:
+            _emit(f"Erasing {self.nickname or self.serial}...")
+            if not _run([COMMANDER_PATH, "device", "masserase"] + conn_flag):
+                return False
+
+        _emit(f"Flashing {_os.path.basename(firmware_path)}...")
+        cmd = [COMMANDER_PATH, "flash", firmware_path] + conn_flag
+        if halt_reset:
+            cmd += ["--halt"]
+        if not _run(cmd):
+            return False
+
+        _emit(f"Flash complete — {_os.path.basename(firmware_path)}")
+        return True
+
     def button(self, pb, duration=0.1):
         if not self._admin_sock:
             return

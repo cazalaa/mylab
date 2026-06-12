@@ -692,6 +692,7 @@ scenario.board(<span class="s">"rx"</span>).cli(<span class="s">"set_mode rx"</s
     <tr><td>board.cli(cmd, timeout=10.0)</td><td>Send CLI command; returns cleaned response (echo + prompt stripped)</td></tr>
     <tr><td>board.admin(cmd, timeout=10.0)</td><td>Send Admin command; returns response string</td></tr>
     <tr><td>board.reset()</td><td>Hardware reset via Admin; waits 1s for boot</td></tr>
+    <tr><td>board.flash(firmware_path, serial=None, ip=None, masserase=True, halt_reset=False)</td><td>Flash a .hex/.s37 firmware file using Simplicity Commander. Connection is auto-detected from board.host (USB if localhost, JLink IP otherwise). Override with <code>serial=</code> for <code>-s</code> or <code>ip=</code> for <code>--ip</code>. Returns True on success.</td></tr>
     <tr><td>board.button(pb, duration=0.1)</td><td>Press push button pb (0 or 1) for given duration</td></tr>
     <tr><td>board.delay(seconds)</td><td>Sleep for given duration</td></tr>
     <tr><td>board.print(msg)</td><td>Emit message to Run panel as [board:nickname]</td></tr>
@@ -700,6 +701,13 @@ scenario.board(<span class="s">"rx"</span>).cli(<span class="s">"set_mode rx"</s
     <tr><td>board.nickname</td><td>Nickname from YAML or SDM (read-only)</td></tr>
   </tbody>
 </table>
+
+<h4>board.flash() examples</h4>
+<div class="code-block"><pre>board.flash(<span class="s">"/path/to/firmware.hex"</span>)                  <span class="c"># auto connection</span>
+board.flash(<span class="s">"/path/to/firmware.hex"</span>, serial=<span class="s">"440012345"</span>) <span class="c"># force -s</span>
+board.flash(<span class="s">"/path/to/firmware.hex"</span>, ip=<span class="s">"192.168.1.100"</span>) <span class="c"># force --ip</span>
+board.flash(<span class="s">"/path/to/firmware.hex"</span>, masserase=<span class="k">False</span>)     <span class="c"># skip erase</span>
+board.flash(<span class="s">"/path/to/firmware.hex"</span>, halt_reset=<span class="k">True</span>)     <span class="c"># hold CPU halted</span></pre></div>
 
 <h3>Real-World Example — IEEE 802.15.4 TX Test</h3>
 <div class="code-block"><pre><span class="k">import</span> time
