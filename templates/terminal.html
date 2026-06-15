@@ -328,6 +328,12 @@ body {
     text-overflow: ellipsis;
 }
 .tm-block-resp.expanded .tm-arrow { transform: rotate(90deg); }
+.tm-block-resp .tm-arrow {
+    font-size: 9px;
+    color: #b5bfc6;
+    flex-shrink: 0;
+    transition: transform .2s;
+}
 .tm-block-resp .tm-response {
     display: none;
     padding: 6px 12px 8px;
@@ -542,7 +548,7 @@ body {
 </div>
 
 <div class="term-action-bar" id="termActionBar">
-    <span class="term-admin-btns" id="termAdminBtns" style="display:none; contents">
+    <span class="term-admin-btns" id="termAdminBtns" style="display:none">
         <button class="term-action-btn" onclick="termCmd('target reset 100')">Reset</button>
         <button class="term-action-btn" onclick="termPb(1)">PB1</button>
         <button class="term-action-btn" onclick="termPb(0)">PB0</button>
@@ -921,666 +927,166 @@ if (document.readyState === "loading") {
 var modernMode = {{ 'true' if terminal_mode == 'modern' else 'false' }};
 
 {% raw %}
-// ══════════════════════════════════════════════════════
-// Modern View Engine
-// ══════════════════════════════════════════════════════
-
-// Per-channel parser state
-// Modern View state — simple, one dict per channel
-var mvState = {
-    vcom:  { buffer: "", lastBootId: null },
-    admin: { buffer: "", lastBootId: null }
-};
-// group_id → DOM entry element (for attaching responses to commands)
-var mvCmdBlocks = {};
-// boot_id → DOM block element (for incremental boot updates)
-var mvBootEls = {};
-
-// Server-parsed groups cache (populated before mvFeed, matched at prompt)
-var mvGroupCache = { vcom: [], admin: [] };
-// RT event lines buffered until prompt, replaced by group or flushed as-is
-var mvEventBuf   = { vcom: [], admin: [] };
+// ══════════════════════════════════════════════════════════════════════
+// Modern View — fully server-driven.
+// The server emits one self-contained `terminal_block` per command / event /
+// boot. The client only appends it to the timeline. No parsing, no state
+// machine, no raw→display reconciliation.
+// ══════════════════════════════════════════════════════════════════════
 
 function applyView() {
     if (modernMode) {
         document.querySelectorAll(".term-pane").forEach(p => p.classList.remove("active"));
         document.querySelectorAll(".term-modern").forEach(p => p.classList.remove("active"));
-        document.getElementById(`modern${cap(activeTab)}`).classList.add("active");
+        const m = document.getElementById("modern" + cap(activeTab));
+        if (m) m.classList.add("active");
     } else {
         document.querySelectorAll(".term-modern").forEach(p => p.classList.remove("active"));
         document.querySelectorAll(".term-pane").forEach(p => p.classList.remove("active"));
-        document.getElementById(`pane${cap(activeTab)}`).classList.add("active");
+        const p = document.getElementById("pane" + cap(activeTab));
+        if (p) p.classList.add("active");
         const t = terminals[activeTab];
         if (t) { setTimeout(() => fitTerm(t.term, t.pane), 50); t.term.focus(); }
     }
 }
 
-// Called for every chunk of raw text received on a channel
-function mvFeed(kind, raw) {
-    if (!modernMode) return;
-    const st = mvState[kind];
-    // Strip ANSI escape codes
-    const text = raw.replace(/\x1b\[[0-9;]*[mGKHFABCDJnr]/g, "")
-                    .replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    st.buffer += text;
-    mvFlush(kind);
-}
+// Local command echo is now produced server-side (command block) — no-op.
+function mvFeed() {}
 
-function mvFlush(kind) {
-    const st = mvState[kind];
-    const lines = st.buffer.split("\n");
-    st.buffer = lines.pop(); // keep incomplete last line
-
-    for (const line of lines) {
-        mvProcessLine(kind, line);
-    }
-    // If buffer ends with a prompt line (e.g. ">", "WSTK>", "TK>")
-    if (/^[^{]*>\s*$/.test(st.buffer.trim())) {
-        mvProcessLine(kind, st.buffer.trim());
-        st.buffer = "";
-    }
-}
-
-function mvProcessLine(kind, line) {
-    const st    = mvState[kind];
-    const clean = line.trim();
-    if (!clean) return;
-
-    const isPrompt    = /^[^{]*>\s*$/.test(clean);
-    const isCmd       = /^>\s+\S/.test(clean) && !/^>\s*\{/.test(clean);
-    const rtMatch     = clean.match(/\{\{(\([^)]+\))/);
-    const rtName      = rtMatch ? rtMatch[1].slice(1, -1) : null;
-    const pendingBase = st.pending ? st.pending.cmd.split(/\s+/)[0] : null;
-    const isRTResp    = rtName !== null && pendingBase !== null && rtName === pendingBase;
-    const isRTEvent   = rtName !== null && !isRTResp;
-    const rtComplete  = /\}\}\s*$/.test(clean);
-    // Payload: starts with { but no (cmd), ends with }}
-    const isPayload   = !rtName && /^\{[^(]/.test(clean) && rtComplete && !st.pending;
-
-    // ── Prompt ──────────────────────────────────────────────────────────────
-    if (isPrompt) {
-        const cache = mvGroupCache[kind];
-        const eBuf  = mvEventBuf[kind];
-
-
-        // Flush buffered event lines — match with groups or display raw
-        if (eBuf.length > 0) {
-            const usedIdx = new Set();
-            for (const ev of eBuf) {
-                let matched = null;
-                if (cache) {
-                    const idx = cache.findIndex((gr, i) => !usedIdx.has(i) &&
-                        ((gr.cmd && ev.raw.includes("(" + gr.cmd + ")")) ||
-                         (gr.raw && gr.raw.some(r => r.trim().startsWith(ev.raw.slice(0, 20)))))
-                    );
-                    if (idx >= 0) { matched = cache[idx]; usedIdx.add(idx); }
-                }
-                if (matched) mvAddGroup(kind, matched);
-                else mvAddEvent(kind, ev.raw.replace(/^>\s+/, ""));
-            }
-            const usedArr = Array.from(usedIdx).sort((a,b) => b-a);
-            for (const i of usedArr) cache.splice(i, 1);
-            mvEventBuf[kind] = [];
-        }
-
-        // Dispatch remaining cached groups (boot, multi-response, etc.)
-        if (cache && cache.length > 0) {
-            for (const g of cache.splice(0)) mvDispatchGroup(kind, g);
-        }
-
-        // Prompt = end of response.
-        // Check cache ONLY for multi-response groups (no cmd match from single response)
-        // A multi-response group has detail (table rows) — single responses don't
-        if (st.pending && cache && cache.length > 0) {
-            const pendingBase = st.pending.cmd.split(/\s+/)[0];
-            const gIdx = cache.findIndex(gr => gr.cmd === pendingBase && gr.detail);
-            if (gIdx >= 0) {
-                const mg = cache.splice(gIdx, 1)[0];
-                const text = mg.summary + (mg.detail ? "\n" + mg.detail : "");
-                if (!st.pending.response.trim()) {
-                    st.pending.response = text;
-                } else {
-                    st.pending.response += "\n" + text;
-                }
-            }
-        }
-        if (st.pending) {
-            mvCloseCmd(kind, st.pending);
-            st.pending = null;
-        }
-        return;
-    }
-
-    // ── Echoed command ───────────────────────────────────────────────────────
-    if (isCmd) {
-        const cmd = clean.replace(/^>\s+/, "");
-        if (st.pending && st.pending.cmd === cmd) return;
-        if (st.pending) { mvCloseCmd(kind, st.pending); }
-        st.pending = { cmd, response: "", ts: mvTime() };
-        st.lastEventEl = null;
-        return;
-    }
-
-    // ── RAILtest complete line (event or response) ───────────────────────────
-    if ((isRTEvent || isRTResp || isPayload) && rtComplete) {
-        // Find matching group in cache by raw line content
-        const cache = mvGroupCache[kind];
-        let g = null;
-        if (cache && cache.length > 0) {
-            // Match: find first group whose cmd matches rtName, or whose raw line matches
-            const stripped = clean.replace(/^>\s+/, "");
-            const idx = cache.findIndex(gr => {
-                // Match by cmd name (most reliable — works even with fragmented lines)
-                if (rtName && gr.cmd === rtName) return true;
-                // Fallback: raw line content match
-                return gr.raw && gr.raw.some(r => {
-                    const rt = r.trim();
-                    return rt === clean || rt === stripped || rt.startsWith(stripped.slice(0, 20));
-                });
-            });
-            if (idx >= 0) {
-                g = cache.splice(idx, 1)[0];
-            }
-        }
-
-        if (isRTEvent) {
-            if (g) {
-                mvAddGroup(kind, g);
-            } else {
-                mvEventBuf[kind].push({ raw: clean, ts: mvTime() });
-            }
-            return;
-        }
-
-        if (isRTResp) {
-            // Response line — add to pending, wait for prompt to close
-            // (don't close immediately — cmd may have additional multi-response lines)
-            const displayVal = g ? g.summary : clean;
-            if (st.pending) {
-                if (clean === st.pending.cmd) return;
-                st.pending.response += (st.pending.response ? "\n" : "") + displayVal;
-                if (g && g.detail) {
-                    st.pending._detail = (st.pending._detail || "") + (st.pending._detail ? "\n" : "") + g.detail;
-                }
-            }
-            return;
-        }
-
-        if (isPayload) {
-            // Payload bytes — attach to last event (rxPacket)
-            if (st.lastEventEl) {
-                const payloadText = g ? g.detail || g.summary : clean;
-                const detail = st.lastEventEl.querySelector(".tm-detail");
-                const header = st.lastEventEl.querySelector(".tm-block-header");
-                if (detail) {
-                    detail.textContent += "\n" + payloadText;
-                } else {
-                    st.lastEventEl.classList.remove("single");
-                    const id = st.lastEventEl.id;
-                    st.lastEventEl.setAttribute("onclick", `tmToggle('${id}','event')`);
-                    const arrow = document.createElement("span");
-                    arrow.className = "tm-arrow";
-                    arrow.textContent = "\u25B6";
-                    header.appendChild(arrow);
-                    const d = document.createElement("div");
-                    d.className = "tm-detail";
-                    d.textContent = header.querySelector(".tm-summary").textContent + "\n" + payloadText;
-                    st.lastEventEl.appendChild(d);
-                }
-                mvScrollBottom(mvGetContainer(kind));
-            }
-            return;
-        }
-    }
-
-    // ── Plain text / unknown ─────────────────────────────────────────────────
-    if (st.pending) {
-        if (clean === st.pending.cmd) return;
-        st.pending.response += (st.pending.response ? "\n" : "") + clean;
-    } else {
-        mvAddEvent(kind, clean);
-    }
-}
-
-function mvIsAtBottom(c) {
-    return c.scrollHeight - c.scrollTop - c.clientHeight < 40;
-}
-function mvScrollBottom(c) {
-    if (mvIsAtBottom(c)) mvScrollBottom(c);
-}
-
+// ── helpers ──────────────────────────────────────────────────────────
+function mvContainer(kind) { return document.getElementById("modern" + cap(kind)); }
+function mvAtBottom(c) { return (c.scrollHeight - c.scrollTop - c.clientHeight) < 40; }
+function mvBottom(c)   { c.scrollTop = c.scrollHeight; }
 function mvTime() {
-    return new Date().toTimeString().slice(0, 8);
+    const d = new Date();
+    return d.toLocaleTimeString("en-GB", { hour12: false }) +
+           "." + String(d.getMilliseconds()).padStart(3, "0");
 }
-
-function mvGetContainer(kind) {
-    return document.getElementById(`modern${cap(kind)}`);
+function esc(s) {
+    return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-
-function mvAddStatus(kind, msg) {
-    const c = mvGetContainer(kind);
-    const e = document.createElement("div");
-    e.className = "tm-entry";
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot tm-dot-status"></div><div class="tm-line"></div></div>
-        <div class="tm-time">${mvTime()}</div>
-        <div class="tm-block-status">${esc2(msg)}</div>`;
-    c.appendChild(e);
-    mvScrollBottom(c);
-}
-
-function mvCloseCmd(kind, pending) {
-    const c   = mvGetContainer(kind);
-    const rid = "tmr_" + Date.now() + Math.random().toString(36).slice(2);
-    const hasResp = !!pending.response.trim();
-
-    // First non-empty line of response
-    const firstLine = pending.response.split("\n").find(l => l.trim()) || "";
-
-    // ── Command block ──
-    const ce = document.createElement("div");
-    ce.className = "tm-entry";
-    ce.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot tm-dot-cmd"></div><div class="tm-line"></div></div>
-        <div class="tm-time">${pending.ts}</div>
-        <div class="tm-block tm-block-cmd">
-            <div class="tm-block-header">
-                <span class="tm-summary">${esc2(pending.cmd)}</span>
-            </div>
-        </div>`;
-    c.appendChild(ce);
-
-    // ── Response block (indented) ──
-    if (hasResp) {
-        const lines = pending.response.trim().split("\n");
-        const multiLine = lines.length > 1 || pending.response.trim().length > 70;
-        // For single-line, show full text; for multi-line, truncate summary
-        const displaySummary = multiLine
-            ? (firstLine.length > 70 ? firstLine.substring(0, 70) + "…" : firstLine)
-            : pending.response.trim();
-
-        const re = document.createElement("div");
-        re.className = "tm-entry tm-entry-response";
-        re.innerHTML = `
-            <div class="tm-spine tm-spine-resp"><div class="tm-dot tm-dot-resp"></div><div class="tm-line"></div></div>
-            <div class="tm-time"></div>
-            <div class="tm-block tm-block-resp${multiLine ? "" : " single"}" id="${rid}"
-                 onclick="${multiLine ? `tmToggle('${rid}','resp')` : ''}">
-                <div class="tm-block-header">
-                    <span class="tm-summary tm-resp-summary">${esc2(displaySummary)}</span>
-                    ${multiLine ? '<span class="tm-arrow">▶</span>' : ''}
-                </div>
-                ${multiLine ? `<div class="tm-response">${esc2(pending.response.trim())}</div>` : ''}
-            </div>`;
-        c.appendChild(re);
-    }
-
-    mvScrollBottom(c);
-
-
-}
-
-function mvAddEvent(kind, text) {
-    // Script events are handled via terminal_script_event — skip plain text duplicates
-    if (/^[▶✓✗]/.test(text.trim())) return;
-    const c  = mvGetContainer(kind);
-    const id = "tme_" + Date.now() + Math.random().toString(36).slice(2);
-    const lines = text.trim().split("\n");
-    const summary = lines[0];
-    const multiLine = lines.length > 1;
-
-    const e = document.createElement("div");
-    e.className = "tm-entry";
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot-icon">⚡</div><div class="tm-line"></div></div>
-        <div class="tm-time">${mvTime()}</div>
-        <div class="tm-block tm-block-event${multiLine ? "" : " single"}" id="${id}"
-             onclick="${multiLine ? `tmToggle('${id}', 'event')` : ''}">
-            <div class="tm-block-header">
-                <span class="tm-summary" title="${esc2(text)}">${esc2(summary)}</span>
-                ${multiLine ? '<span class="tm-arrow">▶</span>' : ''}
-            </div>
-            ${multiLine ? `<div class="tm-detail">${esc2(text)}</div>` : ''}
-        </div>`;
-    c.appendChild(e);
-    // Store reference for potential payload attachment
-    mvState[kind].lastEventEl = e.querySelector(".tm-block-event");
-    mvScrollBottom(c);
-}
-
-function tmToggle(id, type) {
+function tmToggle(id) {
     const el = document.getElementById(id);
-    if (!el) return;
-    el.classList.toggle("expanded");
-    const container = el.closest(".term-modern");
-    if (container) setTimeout(() => mvScrollBottom(container), 50);
+    if (el) el.classList.toggle("expanded");
 }
 
-function esc2(s) {
-    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-{% endraw %}
-
-// ── Modern View line renderers ────────────────────────────────────────────────
-// Called from terminal_line handler — one function per role, no state machine.
-
-function mvLineCmd(kind, pl) {
-    const c   = mvGetContainer(kind);
-    const gid = pl.group_id || ("g" + Date.now());
-    const e   = document.createElement("div");
-    e.className = "tm-entry";
-    e.id = "tme_" + gid;
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot tm-dot-cmd"></div><div class="tm-line"></div></div>
-        <div class="tm-time">${pl.ts || mvTime()}</div>
-        <div class="tm-block tm-block-cmd" id="tmb_${gid}">
-            <div class="tm-block-header">
-                <span class="tm-summary">${esc2(pl.display)}</span>
-            </div>
-        </div>`;
-    c.appendChild(e);
-    mvCmdBlocks[gid] = { kind, respText: "", respDetail: "" };
-    mvScrollBottom(c);
+var _tmSeq = 0;
+function _lineColor(color) {
+    return ({ error: "#E24B4A", warning: "#C77B12",
+              success: "#1D9E75", boot: "#9D2C6B" })[color] || "#4a5a68";
 }
 
-function mvLineResponse(kind, pl) {
-    const gid = pl.group_id;
-    if (!gid || !mvCmdBlocks[gid]) { mvLineEvent(kind, pl); return; }
-    const block = mvCmdBlocks[gid];
-    block.respText   += (block.respText   ? "\n" : "") + (pl.display || "");
-    block.respDetail += (block.respDetail ? "\n" : "") + (pl.detail  || "");
-    _mvUpdateResp(kind, gid, block);
-}
-
-function _mvUpdateResp(kind, gid, block) {
-    const c    = mvGetContainer(kind);
-    const text = block.respDetail
-        ? block.respText + "\n" + block.respDetail
-        : block.respText;
-    const multi = text.includes("\n");
-    const first = text.split("\n").find(l => l.trim()) || text;
-    const rid   = "tmr_" + gid;
-    let re = document.getElementById(rid);
-    if (!re) {
-        re = document.createElement("div");
-        re.className = "tm-entry tm-entry-response";
-        re.id = rid;
-        const cmdEntry = document.getElementById("tme_" + gid);
-        if (cmdEntry) cmdEntry.insertAdjacentElement("afterend", re);
-        else c.appendChild(re);
-    }
-    const bid = "tmrb_" + gid;
-    re.innerHTML = `
-        <div class="tm-spine tm-spine-resp"><div class="tm-dot tm-dot-resp"></div><div class="tm-line"></div></div>
-        <div class="tm-time"></div>
-        <div class="tm-block tm-block-resp${multi ? "" : " single"}" id="${bid}"
-             onclick="${multi ? `tmToggle('${bid}','resp')` : ''}">
-            <div class="tm-block-header">
-                <span class="tm-summary tm-resp-summary" title="${esc2(text)}">${esc2(first)}</span>
-                ${multi ? '<span class="tm-arrow">▶</span>' : ''}
-            </div>
-            ${multi ? `<div class="tm-response">${esc2(text)}</div>` : ''}
-        </div>`;
-    mvScrollBottom(c);
-}
-
-function mvLineEvent(kind, pl) {
-    // If this event belongs to an open command (has group_id in mvCmdBlocks), treat as response
-    if (pl.group_id && mvCmdBlocks[pl.group_id]) {
-        mvLineResponse(kind, pl);
-        return;
-    }
-    const c   = mvGetContainer(kind);
-    const id  = "tme_ev_" + Date.now() + Math.random().toString(36).slice(2);
-    const multi = !!pl.detail;
-    const color = pl.color && pl.color !== "default" ? pl.color : null;
-    const dotColor = color ? ` color-${color}` : "";
-    const blkColor = color ? ` color-${color}` : "";
-    const icon = pl.cmd === "rxPacket" ? "↓"
-               : pl.cmd === "txEnd"    ? "↑"
-               : pl.cmd === "tx"       ? "↑"
-               : pl.cmd === "appMode"  ? "●"
-               : "⚡";
-    const e = document.createElement("div");
-    e.className = "tm-entry";
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot-icon${dotColor}">${icon}</div><div class="tm-line"></div></div>
-        <div class="tm-time">${pl.ts || mvTime()}</div>
-        <div class="tm-block tm-block-event${blkColor}${multi ? "" : " single"}" id="${id}"
-             onclick="${multi ? `tmToggle('${id}','event')` : ''}">
-            <div class="tm-block-header">
-                <span class="tm-summary" title="${esc2(pl.display)}">${esc2(pl.display)}</span>
-                ${multi ? '<span class="tm-arrow">▶</span>' : ''}
-            </div>
-            ${multi ? `<div class="tm-detail">${esc2(pl.detail)}</div>` : ''}
-        </div>`;
-    c.appendChild(e);
-    mvScrollBottom(c);
-}
-
-function mvLineBoot(kind, pl) {
-    const c   = mvGetContainer(kind);
-    const bid = pl.boot_id;
-    if (!pl.boot_first && bid && mvBootEls[bid]) {
-        // Update existing boot block detail
-        const blk = mvBootEls[bid];
-        if (pl.detail) {
-            let det = blk.querySelector(".tm-detail");
-            if (det) { det.textContent = pl.detail; }
-        }
-        mvScrollBottom(c);
-        return;
-    }
-    // Create new boot block
-    const id  = "tmb_boot_" + (bid || Date.now());
-    const multi = !!pl.detail;
-    const e = document.createElement("div");
-    e.className = "tm-entry";
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot-icon color-boot">↺</div><div class="tm-line"></div></div>
-        <div class="tm-time">${pl.ts || mvTime()}</div>
-        <div class="tm-block tm-block-event color-boot${multi ? "" : " single"}" id="${id}"
-             onclick="${multi ? `tmToggle('${id}','event')` : ''}">
-            <div class="tm-block-header">
-                <span class="tm-summary">${esc2(pl.display)}</span>
-                ${multi ? '<span class="tm-arrow">▶</span>' : ''}
-            </div>
-            ${multi ? `<div class="tm-detail">${esc2(pl.detail)}</div>` : ''}
-        </div>`;
-    c.appendChild(e);
-    if (bid) mvBootEls[bid] = e.querySelector(".tm-block-event");
-    mvScrollBottom(c);
-}
-
-function mvLineScript(kind, pl) {
-    const c   = mvGetContainer(kind);
-    const id  = "tms_" + Date.now();
-    const icon = pl.display && pl.display.startsWith("Running") ? "▶" : "✓";
-    const e = document.createElement("div");
-    e.className = "tm-entry";
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot-icon color-script">${icon}</div><div class="tm-line"></div></div>
-        <div class="tm-time">${pl.ts || mvTime()}</div>
-        <div class="tm-block tm-block-event color-script single">
-            <div class="tm-block-header">
-                <span class="tm-summary">${esc2(pl.display)}</span>
-            </div>
-        </div>`;
-    c.appendChild(e);
-    mvScrollBottom(c);
-}
-
-// ── Group rendering (server-parsed, called from terminal_output handler) ─────
-// mvProcessGroup removed — groups consumed via mvGroupCache in mvProcessLine
-
-// Dispatch a group that arrived at prompt flush (no raw line to consume it)
-function mvDispatchGroup(kind, g) {
-    const st = mvState[kind];
-    if (g.type === "boot") { mvAddGroup(kind, g); return; }
-    if (!g.cmd) { mvAddGroup(kind, g); return; }
-
-    // Match group to pending cmd
-    if (st.pending && st.pending.cmd.split(/\s+/)[0] === g.cmd) {
-        const text = g.summary + (g.detail ? "\n" + g.detail : "");
-        st.pending.response += (st.pending.response ? "\n" : "") + text;
-        mvCloseCmd(kind, st.pending);
-        st.pending = null;
-        return;
-    }
-    mvAddGroup(kind, g);
-}
-
-// ── Script command blocks (identified by cmd_id) ─────────────────────────────
-
-function mvCreateCmdBlock(kind, cmd, cmd_id) {
-    const c = mvGetContainer(kind);
-    const e = document.createElement("div");
-    e.className = "tm-entry";
-    e.id = "tmc_" + cmd_id;
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot tm-dot-cmd"></div><div class="tm-line"></div></div>
-        <div class="tm-time">${mvTime()}</div>
-        <div class="tm-block tm-block-cmd" id="tmcb_${cmd_id}">
-            <div class="tm-block-header">
-                <span class="tm-summary">${esc2(cmd)}</span>
-            </div>
-        </div>`;
-    c.appendChild(e);
-    mvCmdBlocks[cmd_id] = { kind, cmd, respText: "", respDetailText: "", respEl: null };
-    mvScrollBottom(c);
-}
-
-function mvAttachGroupToCmd(cmd_id, g) {
-    const block = mvCmdBlocks[cmd_id];
-    if (!block) { mvAddGroup(block?.kind || "vcom", g); return; }
-    const kind = block.kind;
-    const c    = mvGetContainer(kind);
-    const cmdEl = document.getElementById("tmcb_" + cmd_id);
-    if (!cmdEl) return;
-
-    const text   = g.summary || "";
-    const detail = g.detail  || "";
-    block.respText += (block.respText ? "\n" : "") + text;
-    if (detail) block.respDetailText += (block.respDetailText ? "\n" : "") + detail;
-
-    // Build or update the response sub-block
-    let respEntry = document.getElementById("tmcr_" + cmd_id);
-    if (!respEntry) {
-        respEntry = document.createElement("div");
-        respEntry.className = "tm-entry tm-entry-resp";
-        respEntry.id = "tmcr_" + cmd_id;
-        respEntry.innerHTML = `
-            <div class="tm-spine tm-spine-resp"><div class="tm-dot tm-dot-resp"></div><div class="tm-line"></div></div>
-            <div class="tm-time"></div>
-            <div class="tm-block tm-block-resp single" id="tmcrb_${cmd_id}">
-                <div class="tm-block-header">
-                    <span class="tm-summary tm-resp-summary"></span>
-                </div>
-            </div>`;
-        cmdEl.parentElement.insertAdjacentElement("afterend", respEntry);
-    }
-
-    const allText = block.respDetailText
-        ? block.respText + "\n" + block.respDetailText
-        : block.respText;
-    const multiLine = allText.includes("\n");
-    const firstLine = allText.split("\n").find(l => l.trim()) || allText;
-    const rb = document.getElementById("tmcrb_" + cmd_id);
-    if (rb) {
-        rb.className = "tm-block tm-block-resp" + (multiLine ? " expanded" : " single");
-        const rid = "tmcrbi_" + cmd_id;
-        rb.id = rid;
-        rb.setAttribute("onclick", multiLine ? `tmToggle('${rid}','resp')` : "");
-        rb.innerHTML = `
-            <div class="tm-block-header">
-                <span class="tm-summary tm-resp-summary" title="${esc2(allText)}">${esc2(firstLine)}</span>
-                ${multiLine ? '<span class="tm-arrow">▶</span>' : ''}
-            </div>
-            ${multiLine ? `<div class="tm-response">${esc2(allText)}</div>` : ''}`;
-    }
-    mvScrollBottom(c);
-}
-
-
-var mvBootEls = {};
-
-function mvAddGroup(kind, g) {
-    const c = mvGetContainer(kind);
-
-    // Boot update: same boot_id already rendered — update detail only
-    if (g.type === "boot" && g.boot_id && !g.boot_first) {
-        const existing = mvBootEls[g.boot_id];
-        if (existing) {
-            const detailEl = existing.querySelector(".tm-detail");
-            if (detailEl && g.detail) {
-                detailEl.textContent = g.detail;
-            }
-            mvScrollBottom(c);
-            return;
-        }
-    }
-
-    const id      = "tmg_" + Date.now() + Math.random().toString(36).slice(2);
-    const color   = g.color && g.color !== "default" ? g.color : null;
-    const blkCls  = color ? ` color-${color}` : "";
-    const multi   = !!g.detail;
-    // Pick timeline icon based on type/category/color
-    const icon = g.type === "boot"                         ? "↺"
-               : g.category === "rx"                       ? "↓"
-               : g.category === "tx" && g.color==="error"  ? "✗"
-               : g.category === "tx"                       ? "↑"
-               : g.category === "script" && g.summary && g.summary.startsWith("▶") ? "▶"
-               : g.category === "script"                   ? "✓"
-               : g.color === "error"                       ? "✗"
-               : g.color === "warning"                     ? "⚠"
-               : "⚡";
-
-    const e = document.createElement("div");
-    e.className = "tm-entry";
-    e.innerHTML = `
-        <div class="tm-spine"><div class="tm-dot-icon">${icon}</div><div class="tm-line"></div></div>
-        <div class="tm-time">${mvTime()}</div>
-        <div class="tm-block tm-block-event${blkCls}${multi ? "" : " single"}" id="${id}"
-             onclick="${multi ? `tmToggle('${id}','event')` : ''}">
-            <div class="tm-block-header">
-                <span class="tm-summary" title="${esc2(g.summary)}">${esc2(g.summary)}</span>
-                ${multi ? '<span class="tm-arrow">▶</span>' : ''}
-            </div>
-            ${multi ? `<div class="tm-detail">${esc2(g.detail)}</div>` : ''}
-        </div>`;
-    c.appendChild(e);
-    const blkEl = e.querySelector(".tm-block-event");
-    mvState[kind].lastEventEl = blkEl;
-
-    // Register boot element for future updates
-    if (g.type === "boot" && g.boot_id) {
-        mvBootEls[g.boot_id] = blkEl;
-    }
-
-    mvScrollBottom(c);
-}
-
-socket.on("terminal_script_event", ({ room, group }) => {
-    // Legacy — now handled by terminal_line
-});
-socket.on("terminal_cmd", ({ data, room }) => {
-    // Legacy manual command support — terminal_line handles Modern mode
-    if (modernMode) return;
-    const kind = room.split("_").pop();
-    terminals[kind]?.term.write("\x1b[90m› " + data + "\x1b[0m\r\n");
-});
-
-socket.on("terminal_line", (pl) => {
+// ── status line (Connected / Connection closed) ──────────────────────
+function mvAddStatus(kind, msg) {
     if (!modernMode) return;
-    const kind = pl.room ? pl.room.split("_").pop() : "vcom";
-    const role = pl.role;
-    if      (role === "cmd")      mvLineCmd(kind, pl);
-    else if (role === "response") mvLineResponse(kind, pl);
-    else if (role === "event")    mvLineEvent(kind, pl);
-    else if (role === "boot")     mvLineBoot(kind, pl);
-    else if (role === "script")   mvLineScript(kind, pl);
-});
+    const c = mvContainer(kind);
+    if (!c) return;
+    const atBottom = mvAtBottom(c);
+    const e = document.createElement("div");
+    e.className = "tm-entry";
+    e.innerHTML =
+        '<div class="tm-spine"><div class="tm-dot tm-dot-status"></div><div class="tm-line"></div></div>' +
+        '<div class="tm-time">' + mvTime() + '</div>' +
+        '<div class="tm-block tm-block-status">' + esc(msg) + '</div>';
+    c.appendChild(e);
+    if (atBottom) mvBottom(c);
+}
 
+// ── the one and only block renderer ──────────────────────────────────
+function renderBlock(kind, block) {
+    const c = mvContainer(kind);
+    if (!c) return;
+    const atBottom = mvAtBottom(c);
+    const id       = "tmb-" + (++_tmSeq);
+    const ts       = block.ts || mvTime();
+    const lines    = block.lines || [];
+
+    // ── reply: a separate entry, indented to the right under its command ──
+    if (block.kind === "response") {
+        const multi   = lines.length > 1;
+        const summary = esc(block.title) +
+            (multi ? '<span style="color:#b5bfc6"> &nbsp;(' + esc(block.subtitle || (lines.length + " lignes")) + ')</span>' : '');
+        let detail = "";
+        if (multi) {
+            detail = '<div class="tm-response">' + lines.map(l => {
+                const col = (l.color && l.color !== "default") ? ' style="color:' + _lineColor(l.color) + '"' : '';
+                return '<div' + col + '>' + esc(l.text) + '</div>';
+            }).join("") + '</div>';
+        }
+        const click = multi ? ' onclick="tmToggle(\'' + id + '\')"' : '';
+        const e = document.createElement("div");
+        e.className = "tm-entry tm-entry-response";
+        e.innerHTML =
+            '<div class="tm-spine tm-spine-resp"><div class="tm-dot tm-dot-resp"></div><div class="tm-line"></div></div>' +
+            '<div class="tm-time">' + esc(ts) + '</div>' +
+            '<div class="tm-block tm-block-resp' + (multi ? '' : ' single') + '" id="' + id + '"' + click + '>' +
+                '<div class="tm-block-header">' +
+                    '<span class="tm-icon-resp">↳</span>' +
+                    '<span class="tm-resp-summary">' + summary + '</span>' +
+                    (multi ? '<span class="tm-arrow">▶</span>' : '') +
+                '</div>' + detail +
+            '</div>';
+        c.appendChild(e);
+        if (atBottom) mvBottom(c);
+        return;
+    }
+
+    const hasDetail = lines.length > 0;
+    const arrow     = hasDetail ? '<span class="tm-arrow">▶</span>' : '';
+    let dotClass, blockClass, header, detailClass = "tm-detail";
+
+    if (block.kind === "cmd") {
+        // command alone — shown immediately, reply will follow indented below
+        dotClass   = "tm-dot-cmd";
+        blockClass = "tm-block-cmd";
+        header = '<span class="tm-icon">›</span>' +
+                 '<span class="tm-summary">' + esc(block.title) + '</span>';
+    } else if (block.kind === "boot") {
+        dotClass   = "tm-dot-event";
+        blockClass = "tm-block-event color-boot";
+        const sub  = block.subtitle ? '  ' + esc(block.subtitle) : '';
+        header = '<span class="tm-icon">↺</span>' +
+                 '<span class="tm-summary">' + esc(block.title) + sub + '</span>' + arrow;
+    } else { // event
+        dotClass   = "tm-dot-event";
+        blockClass = "tm-block-event" +
+                     (block.color && block.color !== "default" ? " color-" + block.color : "");
+        header = '<span class="tm-icon">⚡</span>' +
+                 '<span class="tm-summary">' + esc(block.title) + '</span>' + arrow;
+    }
+
+    let detailHtml = "";
+    if (hasDetail) {
+        const body = lines.map(l => {
+            const col = (l.color && l.color !== "default")
+                ? ' style="color:' + _lineColor(l.color) + '"' : '';
+            return '<div' + col + '>' + esc(l.text) + '</div>';
+        }).join("");
+        detailHtml = '<div class="' + detailClass + '">' + body + '</div>';
+    }
+
+    const click = hasDetail ? ' onclick="tmToggle(\'' + id + '\')"' : '';
+    const e = document.createElement("div");
+    e.className = "tm-entry";
+    e.innerHTML =
+        '<div class="tm-spine"><div class="tm-dot ' + dotClass + '"></div><div class="tm-line"></div></div>' +
+        '<div class="tm-time">' + esc(ts) + '</div>' +
+        '<div class="tm-block ' + blockClass + '" id="' + id + '"' + click + '>' +
+            '<div class="tm-block-header">' + header + '</div>' +
+            detailHtml +
+        '</div>';
+    c.appendChild(e);
+    if (atBottom) mvBottom(c);
+}
+
+socket.on("terminal_block", (block) => {
+    if (!modernMode) return;
+    const kind = (block.room || "").endsWith("_admin") ? "admin" : "vcom";
+    renderBlock(kind, block);
+});
+{% endraw %}
 </script>
 </body>
 </html>

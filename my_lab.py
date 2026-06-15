@@ -128,7 +128,7 @@ WEB_PORT = int(config["server"].get("web_port", "8080"))
 
 # Terminal parser config
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from parsers import get_parser
+from parsers import get_parser, format_block
 TERMINAL_PARSER  = config["server"].get("parser",           "auto").strip().lower()
 TERMINAL_PRETTY  = config["server"].get("terminal_pretty",  "true").strip().lower() == "true"
 
@@ -584,22 +584,39 @@ active_telnets = {}   # room_id -> socket
 active_boards  = {}   # room_id -> current Board instance (updated each run)
 _room_parsers  = {}   # room_id -> BaseParser (for interactive terminal pretty display)
 
-def _extract_lines(text: str, line_buf: list, parser,
-                   session_log=None, stream="VCOM") -> list:
+# Commands whose response is accumulated verbatim by the parser itself (railtest.py)
+_PASSTHROUGH_CMDS = {"help"}  # kept for reference, handled inside RailtestParser
+
+# A bare prompt that ends a reply ("> ", "WSTK> ") — often sent without a newline
+_PROMPT_TAIL_RE = re.compile(r'^\w*>\s*$')
+
+
+def _extract_blocks(text: str, line_buf: list, parser,
+                    session_log=None, stream="VCOM") -> list:
     """
-    Accumulate TCP fragments into complete lines.
-    Feed each line to the parser → ParsedLine dicts.
-    Write complete lines to session_log if provided.
-    Returns list of ParsedLine dicts.
+    Accumulate TCP fragments into complete lines, feed each to the parser.
+    Returns list of complete block dicts (type='cmd' or 'event').
+
+    line_buf[0] : incomplete trailing fragment (persistent across calls)
     """
-    combined    = line_buf[0] + text
-    combined    = combined.replace("\r\n", "\n").replace("\r", "\n")
+    combined = line_buf[0] + text
+    combined = combined.replace("\r\r\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
     parts       = combined.split("\n")
     line_buf[0] = parts[-1]
     complete    = parts[:-1]
 
-    parsed_lines = []
-    log_lines    = []
+    # A RAILtest prompt ("> ", "WSTK> ") usually arrives WITHOUT a trailing newline,
+    # so it would otherwise sit in line_buf until the next command flushes it — which
+    # is why a reply used to appear only when the following command was sent. If the
+    # leftover fragment is a bare prompt, treat it as a complete line right now.
+    tail = line_buf[0].strip()
+    if tail and _PROMPT_TAIL_RE.match(tail):
+        complete.append(line_buf[0])
+        line_buf[0] = ""
+
+    blocks    = []
+    log_lines = []
+    ts_now    = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
     for raw_line in complete:
         line = raw_line.strip()
@@ -607,20 +624,17 @@ def _extract_lines(text: str, line_buf: list, parser,
             continue
         if session_log:
             log_lines.append(line)
-        # Strip prompt prefix artifact before a {{ line ("> {{(appMode)...")
-        parse_line = re.sub(r'^>\s+(?=\{\{)', '', line)
         try:
-            parsed_lines.extend(parser.feed(parse_line))
+            blocks.extend(parser.feed(line, ts=ts_now))
         except Exception as _pe:
             print(f"[PARSER] error on {line!r}: {_pe}")
 
     if session_log and log_lines:
-        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         with open(session_log, "a") as f:
-            for line in log_lines:
-                f.write(f"[{ts}][{stream}] {line}\n")
+            for ln in log_lines:
+                f.write(f"[{ts_now}][{stream}] {ln}\n")
 
-    return parsed_lines
+    return blocks
 
 
 @socketio.on("connect_telnet")
@@ -645,30 +659,10 @@ def handle_connect_telnet(data):
 
         active_telnets[room] = tn
 
-        # Send a CRLF on VCOM connection — board replies with prompt,
-        # which primes the AutoParser to detect RAILtest before first manual command
-        if room.endswith("_vcom"):
-            try:
-                tn.sendall(b"\r\n")
-            except Exception:
-                pass
-
         # Per-room parser and line buffer for pretty display
         _room_parsers[room] = get_parser(TERMINAL_PARSER)
         parse_line_buf    = [""]   # line fragment accumulator
-        _current_group_id = [None] # current cmd group_id (mutable ref)
 
-        def _check_manual_echo(line: str) -> str | None:
-            """If line matches a pending manual command, pop and return it."""
-            pending = _room_parsers.get(f"{room}_pending_cmds")
-            if not pending:
-                return None
-            clean = line.strip().lstrip(">").strip()
-            for i, cmd in enumerate(pending):
-                if clean == cmd:
-                    pending.pop(i)
-                    return cmd
-            return None
 
         # Session log — one file per terminal connection (vcom only, captures both channels)
         serial_id = room.split("_")[0]
@@ -682,6 +676,15 @@ def handle_connect_telnet(data):
                 f.write(f"# Board: {serial_id}  Host: {host}  Port: {port}\n")
             _room_parsers[f"{serial_id}_session_log"] = session_log
 
+        # Raw TCP log file — VCOM only
+        raw_log_path = None
+        if is_vcom:
+            import os as _os
+            raw_log_path = _os.path.join("logs", f"{serial_id}_raw_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_vcom.log")
+            _os.makedirs("logs", exist_ok=True)
+            with open(raw_log_path, "w") as _rf:
+                _rf.write(f"# room={room} host={data.get('host','?')} port={data.get('port','?')}\n")
+
         def reader():
             print(f"[TELNET] reader started: {room}")
             is_vcom = room.endswith("_vcom")
@@ -693,53 +696,26 @@ def handle_connect_telnet(data):
                     if not chunk:
                         print(f"[TELNET] empty chunk, closing: {room}")
                         break
+                    # Raw log — VCOM only
+                    if raw_log_path:
+                        ts_raw = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        with open(raw_log_path, "a") as _rf:
+                            hex_str = chunk.hex()
+                            printable = chunk.decode("utf-8", errors="replace").replace("\r","\\r").replace("\n","\\n")
+                            _rf.write(f"[{ts_raw}][RX] {hex_str}  |  {printable}\n")
                     text = chunk.decode("utf-8", errors="replace")
                     # Always emit raw data for xterm (Classic mode)
                     socketio.emit("terminal_output",
                                   {"data": text, "room": room},
                                   room=room)
-                    # Parse lines and emit terminal_line events for Modern mode
+                    # Parse complete lines into display blocks for Modern mode
                     if room_parser and TERMINAL_PRETTY:
                         try:
                             stream = "VCOM" if is_vcom else "ADMIN"
-                            parsed = _extract_lines(text, parse_line_buf, room_parser,
-                                                    session_log=session_log, stream=stream)
-                            for pl in parsed:
-                                role = pl.get("role","unknown")
-                                if role == "prompt":
-                                    _current_group_id[0] = None
-                                    # Clear stale pending manual commands
-                                    pending = _room_parsers.get(f"{room}_pending_cmds")
-                                    if pending:
-                                        pending.clear()
-                                    continue
-                                if role == "unknown":
-                                    # Could be a manual command echo not yet recognised
-                                    matched = _check_manual_echo(pl["raw"])
-                                    if matched:
-                                        pl["role"] = "cmd"
-                                        pl["display"] = matched
-                                        role = "cmd"
-                                    else:
-                                        continue
-                                # Check if this is a manual command echo
-                                if role == "cmd":
-                                    matched = _check_manual_echo(pl["raw"])
-                                    if matched:
-                                        pl["display"] = matched  # use exact cmd as typed
-                                # Assign group_id
-                                if role == "cmd":
-                                    import uuid as _uuid
-                                    _current_group_id[0] = _uuid.uuid4().hex[:12]
-                                    pl["group_id"] = _current_group_id[0]
-                                elif role in ("response", "event") and _current_group_id[0]:
-                                    pl["group_id"] = _current_group_id[0]
-                                    if role == "response":
-                                        _current_group_id[0] = None  # response closes group
-                                elif role == "boot":
-                                    pl["group_id"] = pl.get("boot_id")
-                                ts_now = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                                socketio.emit("terminal_line", {**pl, "room": room, "ts": ts_now}, room=room)
+                            for block in _extract_blocks(text, parse_line_buf, room_parser,
+                                                         session_log=session_log, stream=stream):
+                                socketio.emit("terminal_block",
+                                              {**format_block(block), "room": room}, room=room)
                         except Exception as _pe:
                             print(f"[PARSER] error: {_pe}")
                     # Dispatch to board listeners (for script execution)
@@ -766,9 +742,15 @@ def handle_connect_telnet(data):
                         f.write(f"[{ts}][{stream}] {parse_line_buf[0].strip()}\n")
                 with open(session_log, "a") as f:
                     f.write(f"# Session ended: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            # Flush any block still open in the parser (e.g. a half-printed boot)
+            if room_parser and TERMINAL_PRETTY and hasattr(room_parser, "flush"):
+                try:
+                    for block in (room_parser.flush() or []):
+                        socketio.emit("terminal_block",
+                                      {**format_block(block), "room": room}, room=room)
+                except Exception:
+                    pass
             socketio.emit("terminal_closed", {"room": room}, room=room)
-            active_telnets.pop(room, None)
-            _room_parsers.pop(room, None)
         threading.Thread(target=reader, daemon=True).start()
         emit("terminal_ready", {"room": room})
         print(f"[TELNET] terminal_ready emitted: {room}")
@@ -820,54 +802,114 @@ def handle_connect_tty(data):
         print(f"[ERROR] connect_tty {tty_path}: {e}")
         emit("terminal_error", {"message": str(e)})
 
-# Per-session input buffer for admin channels (accumulate keystrokes → emit terminal_cmd on \r)
-_admin_input_buf = {}  # sid -> str
+# Per-session input state for terminal channels
+_admin_input_buf = {}  # key -> current (unterminated) line being typed
+_admin_fwd       = {}  # key -> portion of the current line already sent live (admin)
+
+
+def _tin_ts():
+    return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
+def _tin_send(tn, s):
+    """Send a string to a telnet socket or serial port."""
+    b = s.encode("utf-8")
+    if hasattr(tn, "sendall"):
+        tn.sendall(b)
+    else:
+        tn.write(b)
+
+
+def _tin_log(serial_id, stream, cmd):
+    log_path = _room_parsers.get(f"{serial_id}_session_log")
+    if log_path and cmd:
+        try:
+            with open(log_path, "a") as f:
+                f.write(f"[{_tin_ts()}][{stream}][CMD] {cmd}\n")
+        except Exception:
+            pass
+
 
 @socketio.on("terminal_input")
 def handle_terminal_input(data):
-    room = data["room"]
+    """Accept input as single keystrokes (xterm) OR whole lines (input bar / buttons).
+
+    VCOM  : the command is held until the line is complete, then sent in one shot
+            (avoids the echo/response race). notify_cmd(echo=True) lets the parser
+            recognise the board's echo and open the command block.
+    ADMIN : printable keystrokes are forwarded live so the console echoes as you
+            type; on the terminating newline the parser is told echo=False and the
+            command block is emitted straight away (admin has no board echo).
+    """
+    room = data.get("room")
     tn   = active_telnets.get(room)
-    if tn:
-        try:
-            if hasattr(tn, "sendall"):
-                tn.sendall(data["data"].encode("utf-8"))
+    if not tn:
+        return
+    try:
+        serial_id = room.split("_")[0]
+        is_vcom   = room.endswith("_vcom")
+        stream    = "VCOM" if is_vcom else "ADMIN"
+        key       = f"{room}_{request.sid}"
+        raw       = data.get("data", "")
+        rp        = _room_parsers.get(room)
+
+        # Backspace / delete — edit the buffer (and the live console for admin)
+        if raw in ("\x7f", "\x08"):
+            _admin_input_buf[key] = _admin_input_buf.get(key, "")[:-1]
+            if not is_vcom:
+                _tin_send(tn, raw)
+                fwd = _admin_fwd.get(key, "")
+                if fwd:
+                    _admin_fwd[key] = fwd[:-1]
+            return
+
+        # Admin: forward live printable keystrokes so the console echoes immediately
+        if not is_vcom and "\r" not in raw and "\n" not in raw and raw:
+            _tin_send(tn, raw)
+            _admin_fwd[key] = _admin_fwd.get(key, "") + raw
+
+        # Accumulate and split into complete lines
+        buf   = _admin_input_buf.get(key, "") + raw
+        norm  = buf.replace("\r\n", "\n").replace("\r", "\n")
+        parts = norm.split("\n")
+        _admin_input_buf[key] = parts[-1]          # keep the unterminated tail
+        complete = parts[:-1]
+
+        for line in complete:
+            cmd = line.strip()
+            if is_vcom:
+                if not cmd:
+                    continue
+                if rp and TERMINAL_PRETTY and hasattr(rp, "notify_cmd"):
+                    rp.notify_cmd(cmd, ts=_tin_ts(), echo=True)
+                _tin_send(tn, cmd + "\r\n")
+                _tin_log(serial_id, stream, cmd)
             else:
-                tn.write(data["data"].encode("utf-8"))
-            # Log manual commands to session log
-            serial_id = room.split("_")[0]
-            is_vcom   = room.endswith("_vcom")
-            stream    = "VCOM" if is_vcom else "ADMIN"
-            log_path  = _room_parsers.get(f"{serial_id}_session_log")
-            cmd_text  = data["data"].replace("\r\n","").replace("\r","").replace("\n","").strip()
-            if log_path and cmd_text and cmd_text not in ("\x7f", "\x08"):
-                ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                with open(log_path, "a") as f:
-                    f.write(f"[{ts}][{stream}][CMD] {cmd_text}\n")
-            # Accumulate keystrokes for admin display
-            sid = request.sid
-            raw = data["data"]
-            key = f"{room}_{sid}"
-            if raw in ("\r", "\n", "\r\n"):
-                cmd = _admin_input_buf.pop(key, "").strip()
+                # Admin: send only the part not already forwarded live, plus the newline
+                fwd = _admin_fwd.get(key, "")
+                remainder = line[len(fwd):] if line.startswith(fwd) else line
+                _tin_send(tn, remainder + "\r\n")
+                _admin_fwd[key] = ""
                 if cmd:
-                    if is_vcom:
-                        # Store expected echo so reader emits terminal_line(cmd)
-                        pending = _room_parsers.get(f"{room}_pending_cmds")
-                        if pending is None:
-                            pending = []
-                            _room_parsers[f"{room}_pending_cmds"] = pending
-                        pending.append(cmd)
-                    else:
-                        socketio.emit("terminal_cmd", {"data": cmd, "room": room}, room=room)
-            elif raw in ("\x7f", "\x08"):
-                _admin_input_buf[key] = _admin_input_buf.get(key, "")[:-1]
-            else:
-                _admin_input_buf[key] = _admin_input_buf.get(key, "") + raw
-        except Exception as e:
-            emit("terminal_error", {"message": str(e)})
+                    if rp and TERMINAL_PRETTY and hasattr(rp, "notify_cmd"):
+                        for blk in (rp.notify_cmd(cmd, ts=_tin_ts(), echo=False) or []):
+                            socketio.emit("terminal_block",
+                                          {**format_block(blk), "room": room}, room=room)
+                    _tin_log(serial_id, stream, cmd)
+                    socketio.emit("terminal_cmd", {"data": cmd, "room": room}, room=room)
+    except Exception as e:
+        emit("terminal_error", {"message": str(e)})
 
 
-@app.route("/api/adapter/<serial>/erase", methods=["POST"])
+@app.route("/api/jslog", methods=["POST"])
+def api_jslog():
+    msg = request.json.get("msg", "")
+    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    import os as _os; _os.makedirs("logs", exist_ok=True)
+    with open("logs/jslog.log", "a") as f:
+        f.write(f"[{ts}] {msg}\n")
+    print(f"[JSLOG] {msg}")
+    return jsonify({"ok": True})
 def adapter_erase(serial):
     """Mass erase a single board from Manual Control."""
     try:
@@ -1675,9 +1717,8 @@ class Board:
     def _start_reader(self, sock, room):
         is_vcom  = room.endswith("_vcom")
         stream   = "vcom" if is_vcom else "admin"
-        buf      = []   # accumulates chunks until prompt found
-        parse_line_buf = [""]  # line fragment accumulator for pretty
-
+        buf      = []
+        parse_line_buf    = [""]
         def flush(board):
             if not buf:
                 return
@@ -1695,22 +1736,15 @@ class Board:
                     if not chunk:
                         break
                     text = chunk.decode("utf-8", errors="replace")
-                    board  = active_boards.get(room)
-                    groups = []
-                    if board and TERMINAL_PRETTY:
-                        try:
-                            groups = _extract_groups(text, parse_line_buf, board.parser)
-                        except Exception as _pe:
-                            print(f"[PARSER] error: {_pe}")
-                    socketio.emit("terminal_output",
-                                  {"data": text, "room": room, "groups": groups},
-                                  room=room)
+                    board = active_boards.get(room)
+                    # Only emit terminal_output if connect_telnet is NOT already running
+                    # (to avoid double-display — connect_telnet reader handles terminal_block)
+                    if room not in active_telnets or active_telnets.get(room) is not sock:
+                        socketio.emit("terminal_output",
+                                      {"data": text, "room": room},
+                                      room=room)
                     if board:
-                        if board._log_path:
-                            ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                            with open(board._log_path, "a") as f:
-                                for line in text.splitlines():
-                                    f.write(f"[{ts}][{stream}] {line}\n")
+                        # Session log and listeners (for cli() script support)
                         buf.append(text)
                         prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
                         combined  = "".join(buf)
@@ -1781,6 +1815,11 @@ class Board:
 
         self._vcom_listeners.append(on_data)
         payload = cmd.encode("utf-8") + self._vcom_le
+        # Notify parser that this command is coming from TX
+        vcom_room = f"{self.serial}_vcom"
+        room_parser = _room_parsers.get(vcom_room)
+        if room_parser and hasattr(room_parser, 'notify_cmd'):
+            room_parser.notify_cmd(cmd)
         self._vcom_sock.sendall(payload)
 
         event.wait(timeout=timeout)

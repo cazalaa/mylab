@@ -1,0 +1,651 @@
+# Session started: 2026-06-15 08:35:02
+# Board: 440065813  Host: 192.168.1.195  Port: 4901
+[08:35:06.624][VCOM][CMD] rx 0
+[08:35:06.639][VCOM] rx 0
+[08:35:06.640][VCOM] {{(rx)}{Rx:Disabled}{Idle:Enabled}{Time:4163136635}}
+[08:35:06.646][VCOM] >
+[08:35:11.391][VCOM][CMD] tx 20
+[08:35:11.401][VCOM] tx 20
+[08:35:11.403][VCOM] {{(tx)}{PacketTx:Enabled}{None:Disabled}{Time:4167898598}}
+[08:35:11.406][VCOM] >
+[08:35:16.276][VCOM] {{(appMode)}{None:Enabled}{PacketTx:Disabled}{Time:4172661754}}
+[08:35:16.277][VCOM] {{(txEnd)}{txStatus:Complete}{transmitted:20}{lastTxTime:4172661671}{timePos:6}{durationUs:202}{lastTxStart:4172661469}{ccaSuccess:0}{failed:0}{lastTxStatus:0x000000000}{txRemain:0}{isAck:False}}
+[08:35:22.843][VCOM][CMD] getchannel
+[08:35:22.858][VCOM] getchannel
+[08:35:22.861][VCOM] {{(getchannel)}{channel:0}}
+[08:35:22.861][VCOM] >
+[08:35:28.570][VCOM][CMD] help
+[08:35:28.578][VCOM] help
+[08:35:28.580][VCOM] _________________________________
+[08:35:28.584][VCOM] ____Application_Configuration____
+[08:35:28.589][VCOM] setEventConfig      Control RAIL events.
+[08:35:28.594][VCOM] [uint32] eventsMask<31:0>
+[08:35:28.594][VCOM] [uint32] eventsValues<31:0>
+[08:35:28.599][VCOM] [uint32opt] eventsMask<63:32>
+[08:35:28.604][VCOM] [uint32opt] eventsValues<63:32>
+[08:35:28.609][VCOM] resetCounters       Resets the TX and RX counters.
+[08:35:28.614][VCOM] setPeripheralEnable Control LEDs and LCD peripherals.
+[08:35:28.617][VCOM] [uint8] [0=Disable] 1=Enable
+[08:35:28.625][VCOM] setNotifications    Control asynchronous status prints (rxPacket,txEnd,txError).
+[08:35:28.630][VCOM] [uint8] 0=Disable [1=Enable]
+[08:35:28.636][VCOM] getLogLevels        Show whether notifications or peripherals are enabled.
+[08:35:28.640][VCOM] getVersion          Get version information.
+[08:35:28.644][VCOM] getVersionVerbose   Get verbose version information.
+[08:35:28.650][VCOM] setPtiProtocol      Set PTI protocol for Network Analyzer.
+[08:35:28.657][VCOM] [uint8] 0=Custom 2=Thread 3=BLE 4=Connect 5=Zigbee 6=Z-Wave
+[08:35:28.660][VCOM] getPti              Get PTI configuration.
+[08:35:28.667][VCOM] setPrintingEnable   Control all printing in RAILtest, except CLI.
+[08:35:28.673][VCOM] [uint8] 0=Disable [1=Enable]
+[08:35:28.673][VCOM] ____________________________
+[08:35:28.677][VCOM] ____Receive_and_Transmit____
+[08:35:28.680][VCOM] rx                  Control receive mode.
+[08:35:28.685][VCOM] [uint8] 0=Disable [1=Enable]
+[08:35:28.686][VCOM] rxAt                Configure scheduled receive.
+[08:35:28.691][VCOM] [uint32] startTimeUs
+[08:35:28.698][VCOM] [string] 'rel'=Relative 'abs'=Absolute
+[08:35:28.703][VCOM] [uint32] endTimeUs
+[08:35:28.708][VCOM] [string] 'rel'=Relative 'abs'=Absolute
+[08:35:28.712][VCOM] [uint8opt] rxTransEndSched: [0]/1
+[08:35:28.715][VCOM] [uint8opt] hardEnd: [0]/1
+[08:35:28.722][VCOM] setRxOptions        Show/Configure receive options (RAIL_RX_OPTIONs).
+[08:35:28.726][VCOM] [uint32opt] rxOptionsValues: bitmask of enabled options
+[08:35:28.731][VCOM] tx                  Transmit packets with current TX options.
+[08:35:28.740][VCOM] [uint32] number of packets, 0=continuous until next 'tx 0'
+[08:35:28.746][VCOM] txWithOptions       Same tx command. This command is deprecated.
+[08:35:28.751][VCOM] [uint32] number of packets, 0=continuous until next 'tx 0'
+[08:35:28.760][VCOM] txAfterRx           Schedule a TX with specified delay after each RX.
+[08:35:28.761][VCOM] [uint32] delayUs: 0=Disable
+[08:35:28.770][VCOM] configTxOptions     Show/Configure transmit options (RAIL_TX_OPTIONs).
+[08:35:28.776][VCOM] [uint32opt] txOptionsValues: bitmask of enabled options
+[08:35:28.783][VCOM] setFixedLength      Configure fixed length packet operation.
+[08:35:28.787][VCOM] [uint16] fixedLength: payload bytes
+[08:35:28.791][VCOM] setPower            Set the transmit power. The radio must be IDLE.
+[08:35:28.796][VCOM] [int32] power: deci-dBm unless 'raw' is added
+[08:35:28.805][VCOM] [stringopt] 'raw'=units are raw power level
+[08:35:28.810][VCOM] getPower            Get the transmit power in deci-dBm.
+[08:35:28.816][VCOM] setPowerConfig      Set transmit PA configuration. Must use setpower afterwards.
+[08:35:28.820][VCOM] [string] paMode
+[08:35:28.821][VCOM] [uint16] millivolts
+[08:35:28.826][VCOM] [uint16] rampTimeUs
+[08:35:28.831][VCOM] getPowerConfig      Get the transmit PA configuration.
+[08:35:28.836][VCOM] getPowerLimits      Get min and max powerLevel for a power mode.
+[08:35:28.840][VCOM] [uint8opt] powerMode
+[08:35:28.847][VCOM] enablePaAutoMode    Control automatic PA selection based on the TX power level.
+[08:35:28.852][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:28.856][VCOM] configPaAutoMode    Configure entries in the default PA Auto Mode plugin.
+[08:35:28.861][VCOM] [uint8] start Index
+[08:35:28.866][VCOM] [int32opt] min max mode band: PA auto config entries
+[08:35:28.875][VCOM] sweepTxPower        Sweep TX power for the current PA by toning at each level.
+[08:35:28.881][VCOM] offsetLqi           Adjust the hardware's LQI value for received packets.
+[08:35:28.887][VCOM] [int32] offset: signed value to add
+[08:35:28.891][VCOM] The resulting LQI is capped within 0..255 range.
+[08:35:28.900][VCOM] getRssi             Get RSSI in dBm. It'll be invalid if receiver isn't ready.
+[08:35:28.906][VCOM] [uint32opt] [0=don't wait] 1=wait for valid RSSI if possible
+[08:35:28.915][VCOM] sweepPower          Sweep power by toning low/high in a square wave fashion.
+[08:35:28.917][VCOM] [int32] lowPower: deci-dBm
+[08:35:28.921][VCOM] [int32] hiPower: deci-dBm
+[08:35:28.925][VCOM] [uint32] periodUs
+[08:35:28.930][VCOM] startAvgRssi        Start AGC RSSI averaging.
+[08:35:28.931][VCOM] [uint32] averageTimeUs
+[08:35:28.940][VCOM] [uint16opt] channel: if different than current channel
+[08:35:28.945][VCOM] getAvgRssi          Get AGC RSSI averaging result.
+[08:35:28.950][VCOM] setTxTone           Control tone transmission.
+[08:35:28.952][VCOM] [uint32] 0=Disable 1=Enable
+[08:35:28.958][VCOM] [uint32opt] antenna: [0]/1
+[08:35:28.961][VCOM] [uint32opt] mode: [0]/1=phaseNoise
+[08:35:28.967][VCOM] setTxStream         Control stream transmission.
+[08:35:28.970][VCOM] [uint32] 0=Disable 1=Enable
+[08:35:28.976][VCOM] [uint32opt] streamMode: [1=PN9] 2=1010 3=phaseNoise 0=tone
+[08:35:28.981][VCOM] [uint32opt] antenna: [0]/1
+[08:35:28.988][VCOM] status              Print the current status counters.
+[08:35:28.991][VCOM] fifoStatus          Print the current FIFO-related counters.
+[08:35:28.996][VCOM] setTxHoldOff        Control transmit hold-off (blocking of transmits).
+[08:35:29.001][VCOM] [uint32] 0=Disable 1=Enable
+[08:35:29.006][VCOM] setTxDelay          Set the inter-packet delay for repeated TX.
+[08:35:29.011][VCOM] [uint32] delayMilliseconds
+[08:35:29.019][VCOM] getTxDelay          Get the inter-packet millisecond delay for repeated TX.
+[08:35:29.024][VCOM] setTxPayload        Set TX packet payload bytes for future transmits.
+[08:35:29.027][VCOM] [uint16] offset
+[08:35:29.031][VCOM] [uint8opt] byte0 byte1 ...
+[08:35:29.040][VCOM] setTxRandom         Set a specified range of bytes in the Tx packet payload to a
+[08:35:29.047][VCOM] random value. Call setTxRandom again to stop randomizing the payload.
+[08:35:29.052][VCOM] [uint16opt] Start Index
+[08:35:29.055][VCOM] [uint16opt] End Index
+[08:35:29.060][VCOM] setTxPayloadQuiet   Like setTxPayload, but less verbose.
+[08:35:29.061][VCOM] [uint16] offset
+[08:35:29.068][VCOM] [uint8opt] byte0 byte1 ...
+[08:35:29.074][VCOM] setTxLength         Set how much data to load into the TX FIFO for transmitting.
+[08:35:29.082][VCOM] Actual packet length may vary based on radio configuration.
+[08:35:29.084][VCOM] [uint16] lengthBytes
+[08:35:29.092][VCOM] printTxPacket       Print the current TX payload data and byte length.
+[08:35:29.098][VCOM] peek                Peek at the start of the receive buffer.
+[08:35:29.099][VCOM] [uint16] bytes: 1-10
+[08:35:29.105][VCOM] [uint16opt] offset: [0]
+[08:35:29.109][VCOM] getTime             Get the current RAIL time in microseconds.
+[08:35:29.115][VCOM] setTime             Set the current RAIL time.
+[08:35:29.116][VCOM] [uint32] timeUs
+[08:35:29.123][VCOM] dataConfig          Control the data methods for TX and RX.
+[08:35:29.127][VCOM] [string] txMethod: 'pkt'/'fifo'
+[08:35:29.132][VCOM] [string] rxMethod: 'pkt'/'fifo'
+[08:35:29.138][VCOM] [uint8opt] RAIL_RxDataSource_t (>0 needs fifo mode)
+[08:35:29.145][VCOM] [uint8opt] RAIL_TxDataSource_t (>0 needs ping-pong buffer)
+[08:35:29.150][VCOM] setRxFifo           Set the receive buffer length.
+[08:35:29.155][VCOM] [uint16] lengthBytes: range 64-RX_BUFFER_SIZE
+[08:35:29.160][VCOM] setTxFifo           Set the transmit buffer length.
+[08:35:29.167][VCOM] [uint16] lengthBytes: range 64-TX_BUFFER_SIZE, 0 for default size
+[08:35:29.173][VCOM] setTxFifoThreshold  Set the TX FIFO Almost Empty threshold.
+[08:35:29.179][VCOM] [uint16] thresholdBytes: below which the event triggers
+[08:35:29.185][VCOM] setRxFifoThreshold  Set the RX FIFO Almost Full threshold.
+[08:35:29.193][VCOM] [uint16] thresholdBytes: above which the event triggers
+[08:35:29.196][VCOM] fifoModeTestOptions Manual control over RAILtest FIFO actions.
+[08:35:29.203][VCOM] [uint8] txFifo: 1=Manual 0=Automatic
+[08:35:29.206][VCOM] [uint8] rxFifo: 1=Manual 0=Automatic
+[08:35:29.215][VCOM] rxFifoManualRead    Read and print bytes from receive FIFO when in manual mode.
+[08:35:29.220][VCOM] [uint8] appendedInfo: 1=include packet metadata
+[08:35:29.224][VCOM] [uint16] bytesToRead
+[08:35:29.230][VCOM] [uint8opt] [0=don't] 1=show timestamps with appendedInfo
+[08:35:29.236][VCOM] txFifoManualLoad    Try to load data into available TX FIFO space.
+[08:35:29.241][VCOM] fifoReset           Reset the transmit and/or receive FIFO.
+[08:35:29.246][VCOM] [uint8] tx: 1=reset TX FIFO
+[08:35:29.250][VCOM] [uint8] rx: 1=reset RX FIFO
+[08:35:29.256][VCOM] abortRxPacket       Idle the radio shortly after RX sync word detection.
+[08:35:29.260][VCOM] [uint32] abortOffsetUs
+[08:35:29.265][VCOM] printTxAcks         Control printing of TX ACK packets.
+[08:35:29.270][VCOM] [uint8] [0=Disable] 1=Enable
+[08:35:29.275][VCOM] configRxHopping     Configure an RX Channel Hopping sequence.
+[08:35:29.281][VCOM] [uint32opt] channel hopMode param delayUs: a hop's config,
+[08:35:29.287][VCOM] repeat for additional hops ...
+[08:35:29.295][VCOM] Use no arguments to get Z-Wave radio config defaults.
+[08:35:29.300][VCOM] enableRxHopping     Control RX channel hopping previously configured.
+[08:35:29.305][VCOM] [uint8] [0=Disable] 1=Enable
+[08:35:29.310][VCOM] [uint8opt] [0=Continue] 1=Restart sequence
+[08:35:29.316][VCOM] configRxHoppingOpts Configure options for a hop. Use configRxHopping after.
+[08:35:29.320][VCOM] [uint8] hopIndex
+[08:35:29.333][VCOM] [uint8] options
+[08:35:29.333][VCOM] [int8opt] rssiThreshold: dBm for the threshold option
+[08:35:29.339][VCOM] configRxMultiHop    Configure multi-sense for a hop. Use configRxHopping after.
+[08:35:29.340][VCOM] [uint8] hopIndex
+[08:35:29.344][VCOM] [uint32] syncDetectUs
+[08:35:29.348][VCOM] [uint32] preambleSenseUs
+[08:35:29.353][VCOM] [uint32] timingSenseUs
+[08:35:29.358][VCOM] [uint32] timingReSenseUs
+[08:35:29.363][VCOM] getRxHoppingRssi    Get the latest RSSI for a hopping channel.
+[08:35:29.364][VCOM] [uint8] hopIndex
+[08:35:29.371][VCOM] spectrumAnalyzer    Hop across a channel range to see the RSSI distribution.
+[08:35:29.377][VCOM] [uint8] 1=Show ASCII-Art graph (non-parseable output)
+[08:35:29.381][VCOM] [uint16opt] minChannel: [0]-65535
+[08:35:29.386][VCOM] [uint16opt] maxChannel: 0-[65535]
+[08:35:29.395][VCOM] Channel range is limited by the PHY and by hopping's
+[08:35:29.398][VCOM] MAX_NUMBER_CHANNELS.
+[08:35:29.403][VCOM] configRxDutyCycle   Configure RX Duty Cycling of the receiver.
+[08:35:29.407][VCOM] [uint32] hopMode
+[08:35:29.415][VCOM] [int32] parameter(s) {syncUs preamUs timingUs retimingUs}
+[08:35:29.416][VCOM] [int32] delayUs
+[08:35:29.420][VCOM] [int32opt] options
+[08:35:29.426][VCOM] [int32opt] rssiThreshold: dBm for the threshold option
+[08:35:29.431][VCOM] enableRxDutyCycle   Control RX duty cycling previously configured.
+[08:35:29.436][VCOM] [uint8] DutyCycling: 0=Disable 1=Enable
+[08:35:29.445][VCOM] [uint8opt] ScheduledWakeup: [0=Disable] 1=Enable
+[08:35:29.450][VCOM] getDefaultRxDutyCycleConfig Get the default RX duty cycle configuration.
+[08:35:29.457][VCOM] setTxAltPreambleLen Set alternate TX preamble length, enabled via txOptions.
+[08:35:29.461][VCOM] [uint16] preambleBits
+[08:35:29.467][VCOM] configSyncWords     Set sync words and their length. The radio must be off.
+[08:35:29.472][VCOM] [uint8] bits: 2-32
+[08:35:29.476][VCOM] [uint32] syncWord1
+[08:35:29.479][VCOM] [uint32opt] syncWord2: [same as syncWord1]
+[08:35:29.487][VCOM] getSyncWords        Get the sync word length in bits and value(s).
+[08:35:29.491][VCOM] printRxErrors       Control printing of RX error packets.
+[08:35:29.496][VCOM] [uint8] [0=Disable] 1=Enable
+[08:35:29.502][VCOM] printRxFreqOffsets  Control printing of RX frequency offsets.
+[08:35:29.505][VCOM] [uint8] [0=Disable] 1=Enable
+[08:35:29.511][VCOM] printDataRates      Print the data rates of the current PHY.
+[08:35:29.517][VCOM] stopInfinitePream   Stops an infinite preamble transmission.
+[08:35:29.520][VCOM] ___________________________________
+[08:35:29.522][VCOM] ____Energy_Modes_and_RF_Sensing____
+[08:35:29.529][VCOM] sleep               Sleep until UART input or RF Sensed (if either configured).
+[08:35:29.537][VCOM] [string] energyMode: 0-4[hs], for EM1P use 2 with radio on
+[08:35:29.543][VCOM] [uint32opt] Legacy: RfSenseUs
+[08:35:29.547][VCOM] RfBand: 0=none,1=GHz,2=MHz,3=both
+[08:35:29.555][VCOM] or Selective: SyncwordBytes Syncword RfBand
+[08:35:29.556][VCOM] rfsense             Start RfSensing.
+[08:35:29.561][VCOM] [uint32] Legacy: RfSenseUs; Selective: SyncwordBytes
+[08:35:29.570][VCOM] [uint32opt] Legacy: RfBand: 0=none,1=GHz,2=MHz,3=both
+[08:35:29.578][VCOM] or Selective: Syncword RfBand: as above
+[08:35:29.583][VCOM] configRfSenseWakeup Configure RFSense Selective Wakeup PHY for transmitting.
+[08:35:29.591][VCOM] setRfSenseTxPayload Load TX FIFO with RfSense Selective(OOK) Mode wake packet.
+[08:35:29.595][VCOM] [uint8] syncwordNumBytes: 1-4
+[08:35:29.602][VCOM] [uint32] syncWord: sent from least to most significant byte
+[08:35:29.602][VCOM] _________________________
+[08:35:29.604][VCOM] ____Address_Filtering____
+[08:35:29.610][VCOM] configAddressFilter Configure the addresss filter.
+[08:35:29.615][VCOM] [uint32] matchTable
+[08:35:29.620][VCOM] [uint8opt] offset0 size0 offset1 size1 ...
+[08:35:29.625][VCOM] Enter more offsets and sizes if required.
+[08:35:29.630][VCOM] setAddressFiltering Control address filtering.
+[08:35:29.633][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:29.640][VCOM] getAddressFiltering Get the current state of address filtering.
+[08:35:29.645][VCOM] printAddresses      Print the current address filtering addresses.
+[08:35:29.650][VCOM] setAddress          Set a specific filtering address value.
+[08:35:29.651][VCOM] [uint8] field: 0-1
+[08:35:29.656][VCOM] [uint8] filterIndex: 0-3
+[08:35:29.661][VCOM] [uint8opt] addrByte0 addrByte1 ... addrByte7
+[08:35:29.666][VCOM] setAddressMask      Set a specific filtering address mask.
+[08:35:29.672][VCOM] [uint8] field: 0-1
+[08:35:29.675][VCOM] [uint8opt] bitMask
+[08:35:29.681][VCOM] setAddressEnable    Control address filtering for a specific address.
+[08:35:29.685][VCOM] [uint8] field: 0-1
+[08:35:29.690][VCOM] [uint8] filterIndex: 0-3
+[08:35:29.691][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:29.695][VCOM] __________________________
+[08:35:29.696][VCOM] ____Error_Rate_Testing____
+[08:35:29.705][VCOM] perRx               Start a Packet Error Rate test. 'perRx 0 0' stops test.
+[08:35:29.710][VCOM] [uint32] number of packets
+[08:35:29.714][VCOM] [uint32] delayUs
+[08:35:29.717][VCOM] perStatus           Get the PER test results. Also see status command.
+[08:35:29.725][VCOM] setBerConfig        Set number of bytes to receive in BER mode.
+[08:35:29.730][VCOM] [uint32] number of bytes: 0=maximum (536870911)
+[08:35:29.734][VCOM] berRx               Control BER receive mode.
+[08:35:29.738][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:29.745][VCOM] berStatus           Get status of current or last BER test.
+[08:35:29.750][VCOM] Status is reset by setBerConfig and berRx enable.
+[08:35:29.751][VCOM] ______________________________
+[08:35:29.755][VCOM] ____Listen_Before_Talk_LBT____
+[08:35:29.760][VCOM] setLbtMode          Show/Set the LBT mode for transmits.
+[08:35:29.765][VCOM] [stringopt] 'off'/'csma'/'lbt'
+[08:35:29.770][VCOM] getLbtParams        Get the current LBT parameters.
+[08:35:29.773][VCOM] setLbtParams        Set LBT parameters.
+[08:35:29.778][VCOM] [uint8] minBo
+[08:35:29.779][VCOM] [uint8] maxBo
+[08:35:29.783][VCOM] [uint8] tries
+[08:35:29.789][VCOM] [int32] ccaThreshold
+[08:35:29.789][VCOM] [uint16] backoffUs
+[08:35:29.792][VCOM] [uint16] durationUs
+[08:35:29.796][VCOM] [uint32] timeoutUs
+[08:35:29.800][VCOM] set802154CcaMode    Set 802.15.4 CCA Mode
+[08:35:29.809][VCOM] [uint8] ccaMode 0=RSSI 1=Signal 2=RSSI|Signal 3=RSSI&Signal 4=Always transmit
+[08:35:29.809][VCOM] _____________________
+[08:35:29.812][VCOM] ____802_15_4_Mode____
+[08:35:29.817][VCOM] enable802154        Configure and enable 802.15.4 mode.
+[08:35:29.821][VCOM] [string] defaultState: 'idle'/'rx'
+[08:35:29.826][VCOM] [uint16] idleToRxUs
+[08:35:29.830][VCOM] [uint16] turnaroundTimeUs
+[08:35:29.834][VCOM] [int16] ackTimeoutUs: to ACK's sync-detect
+[08:35:29.841][VCOM] [uint8opt] defaultFP: [0]/1 Frame Pending for poll ACKs
+[08:35:29.847][VCOM] list2p4Ghz802154ConfigsList supported 2.4 GHz 802.15.4 configs.
+[08:35:29.851][VCOM] config2p4GHz802154  Configure the radio for 2.4 GHz 802.15.4.
+[08:35:29.856][VCOM] Use with enable802154.
+[08:35:29.866][VCOM] [uint8opt] [uint8opt] config: see list2p4Ghz802154Configs (ignores any remaining parameters if > 1)
+[08:35:29.871][VCOM] [uint8opt] coex: [0=Disable] 1=Enable
+[08:35:29.876][VCOM] [uint8opt] fem: [0=Disable] 1=Enable
+[08:35:29.881][VCOM] [uint8opt] custom: [0=None] 1=Custom1
+[08:35:29.886][VCOM] [uint8opt] 2mbps: [0=Disable]  1=Enable
+[08:35:29.895][VCOM] config863MHz802154  Configure the radio for 863 MHz 802.15.4 GB868.
+[08:35:29.896][VCOM] Use with enable802154.
+[08:35:29.905][VCOM] config915MHz802154  Configure the radio for 915 MHz 802.15.4 GB868.
+[08:35:29.907][VCOM] Use with enable802154.
+[08:35:29.912][VCOM] set802154e          Configure 802.15.4E options.
+[08:35:29.916][VCOM] [uint32] RAIL_IEEE802154_EOptions_t
+[08:35:29.921][VCOM] set802154g          Configure 802.15.4G options.
+[08:35:29.927][VCOM] [uint32] RAIL_IEEE802154_GOptions_t
+[08:35:29.932][VCOM] set802154FpMode     Control early and data frame pending lookup.
+[08:35:29.936][VCOM] [uint8] early:     [0=Disable] 1=Enable
+[08:35:29.941][VCOM] [uint8] dataframes:[0=Disable] 1=Enable
+[08:35:29.946][VCOM] acceptFrames        Control 802.15.4 frame type acceptance.
+[08:35:29.951][VCOM] [uint8] command: 0=Reject [1=Accept]
+[08:35:29.958][VCOM] [uint8] ack:    [0=Reject] 1=Accept
+[08:35:29.963][VCOM] [uint8] data:    0=Reject [1=Accept]
+[08:35:29.968][VCOM] [uint8] beacon:  0=Reject [1=Accept]
+[08:35:29.974][VCOM] [uint8opt] multipurpose: [0=Reject] 1=Accept
+[08:35:29.978][VCOM] setPromiscuousMode  Control promiscuous mode.
+[08:35:29.983][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:29.989][VCOM] setRxToEnhAckTx     Set an RxToTx turnaround time used just for Enh-ACKs.
+[08:35:29.994][VCOM] [int32] rxToTxUs (0=same as Imm-ACKs, -1=don't change)
+[08:35:30.010][VCOM] setPanCoordinator   Control whether node is a PAN coordinator.
+[08:35:30.010][VCOM] [uint8] 1=Yes 0=No
+[08:35:30.010][VCOM] setPanId802154      Set the PAN ID for a filtering index.
+[08:35:30.012][VCOM] [uint16] panId
+[08:35:30.017][VCOM] [uint8opt] filterIndex: [0]-2
+[08:35:30.023][VCOM] setShortAddr802154  Set the short address for a filtering index.
+[08:35:30.027][VCOM] [uint16] shortAddr
+[08:35:30.034][VCOM] [uint8opt] filterIndex: [0]-2
+[08:35:30.038][VCOM] setLongAddr802154   Set the long address for a filtering index.
+[08:35:30.039][VCOM] [uint8] longAddr_0
+[08:35:30.043][VCOM] [uint8] longAddr_1
+[08:35:30.048][VCOM] [uint8] longAddr_2
+[08:35:30.049][VCOM] [uint8] longAddr_3
+[08:35:30.054][VCOM] [uint8] longAddr_4
+[08:35:30.058][VCOM] [uint8] longAddr_5
+[08:35:30.059][VCOM] [uint8] longAddr_6
+[08:35:30.064][VCOM] [uint8] longAddr_7
+[08:35:30.070][VCOM] [uint8opt] filterIndex: [0]-2
+[08:35:30.074][VCOM] setAddresses802154  Set all 802.15.4 address information.
+[08:35:30.078][VCOM] [uint16] panId0
+[08:35:30.079][VCOM] [uint16] shortAddr0
+[08:35:30.085][VCOM] [stringopt] longAddr0
+[08:35:30.090][VCOM] [stringopt] panId1 shortAddr1 longAddr1 ...
+[08:35:30.097][VCOM] configRxChannelSwitching802154 Configure RX channel switching for 2.4 GHz 802.15.4
+[08:35:30.101][VCOM] [uint16] First radio channel
+[08:35:30.106][VCOM] [uint16] Second radio channel
+[08:35:30.111][VCOM] setDataReqLatency   Set data request event processing latency.
+[08:35:30.115][VCOM] [uint32] latencyUs
+[08:35:30.122][VCOM] set802154PHR        Set PHR (first 1, 2 or 4 bytes) in Tx buffer according to
+[08:35:30.128][VCOM] the 'format' input parameter.
+[08:35:30.133][VCOM] PHR 'frameLength' field is derived from TxLength set
+[08:35:30.137][VCOM] previously with 'setTxLength'
+[08:35:30.145][VCOM] For PHR fields info, refer to 802.15.4 specification.
+[08:35:30.153][VCOM] [uint8] PHR format: 0=misc IEEE802154 modulations, PHR 1byte
+[08:35:30.158][VCOM] 1=SUN FSK, PHR 2bytes
+[08:35:30.163][VCOM] 2=SUN OFDM, PHR 4bytes
+[08:35:30.168][VCOM] 3=SUN OQPSK, PHR 4bytes
+[08:35:30.172][VCOM] [uint8opt] For LEG_OQPSK: none
+[08:35:30.176][VCOM] For SUN_FSK  : fcsTtype
+[08:35:30.181][VCOM] For SUN_OFDM : rate
+[08:35:30.186][VCOM] For SUN_OQPSK: spreadingMode
+[08:35:30.191][VCOM] [uint8opt] For LEG_OQPSK: none
+[08:35:30.196][VCOM] For SUN_FSK  : whitening
+[08:35:30.202][VCOM] For SUN_OFDM : scrambler
+[08:35:30.207][VCOM] For SUN_OQPSK: rateMode
+[08:35:30.221][VCOM] trigModeSwitchTx    Transmit a Mode Switch packet then transmit packets on the new PHY with current
+[08:35:30.224][VCOM] TX options Depending on modeSwitchLife configuration, after all iterations are
+[08:35:30.232][VCOM] done, it either stays on the new PHY or returns to the base PHY.
+[08:35:30.239][VCOM] [uint8] new PhyModeId, i.e. ID of the PHYMode we are switching to
+[08:35:30.244][VCOM] [uint8] number of packets transmitted on the new PHY
+[08:35:30.254][VCOM] [uint32opt] number of times the sequence -mode switch packet followed by data packets- is
+[08:35:30.259][VCOM] repeated, default is 1 if argument is absent
+[08:35:30.269][VCOM] [uint32opt] delayMilliseconds before switching back to base PHY after all packets have been
+[08:35:30.280][VCOM] transmitted on the new PHY, default is 0 if argument is absent. Multitimer is
+[08:35:30.283][VCOM] used for delay greater than 0.
+[08:35:30.291][VCOM] modeSwitchLife      Return to the base PHY after all data packets transmission for TX or after
+[08:35:30.300][VCOM] MODE_SWITCH_START event and multitimer expiration after first data packet
+[08:35:30.305][VCOM] reception on new phy for RX.
+[08:35:30.315][VCOM] [uint8] 0=stay on new PHY (normal Wi-SUN FAN behaviour) 1=return to base PHY (special test mode)
+[08:35:30.316][VCOM] ________________
+[08:35:30.316][VCOM] ____BLE_Mode____
+[08:35:30.322][VCOM] setBleMode          Control BLE mode.
+[08:35:30.327][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:30.330][VCOM] getBleMode          Get the current BLE mode.
+[08:35:30.337][VCOM] setBleChannelParams Configure channel parameters related to BLE.
+[08:35:30.340][VCOM] [uint8] logicalChannel
+[08:35:30.345][VCOM] [uint32opt] accessAddr crcInit disableWhiten
+[08:35:30.351][VCOM] setBlePhySwitchToRx Configure BLE PhySwitchToRx parameters. RX is
+[08:35:30.356][VCOM] entered timeDeltaUs after sync word of received packet.
+[08:35:30.361][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:30.366][VCOM] [uint32opt] phy timeDelta physicalChannel
+[08:35:30.372][VCOM] [uint32opt] logicalChannel accessAddr crcInit
+[08:35:30.376][VCOM] [uint32opt] disableWhiten
+[08:35:30.382][VCOM] [uint32opt] extraDelayUs
+[08:35:30.386][VCOM] setBleAdvertising   Configure for BLE advertising.
+[08:35:30.390][VCOM] [uint8] advChannel: 37-39
+[08:35:30.394][VCOM] setBle1Mbps         Switch to the 1Mbps BLE PHY.
+[08:35:30.399][VCOM] [uint8opt] 0=Legacy 1=Viterbi [chip default]
+[08:35:30.405][VCOM] setBle2Mbps         Switch to the 2Mbps BLE PHY.
+[08:35:30.410][VCOM] [uint8opt] 0=Legacy 1=Viterbi [chip default]
+[08:35:30.415][VCOM] setBleCoding        Switch to a BLE coded PHY.
+[08:35:30.420][VCOM] [uint8] RAIL_BLE_Coding_t value
+[08:35:30.423][VCOM] setBleSimulscan     Switch to a BLE simulscan PHY.
+[08:35:30.425][VCOM] ___________________
+[08:35:30.426][VCOM] ____Z_Wave_Mode____
+[08:35:30.431][VCOM] setZWaveMode        Show/Control Z-Wave mode.
+[08:35:30.438][VCOM] [uint8opt] 0=Disable 1=Enable
+[08:35:30.439][VCOM] [uint8opt] optionsBitmask
+[08:35:30.445][VCOM] getZWaveMode        Get the current Z-Wave mode.
+[08:35:30.446][VCOM] setZWaveRegion      Set the Z-Wave region.
+[08:35:30.451][VCOM] [uint8] region: see listZWaveRegions
+[08:35:30.460][VCOM] performZwaveIrcal   Perform IRCAL across all channels of the current Z-Wave region.
+[08:35:30.466][VCOM] [uint8opt] [0=Use cached IRCAL values], 1=Force IRCAL
+[08:35:30.471][VCOM] getZWaveRegion      Get the current Z-Wave region.
+[08:35:30.477][VCOM] listZWaveRegions    List supported Z-Wave regions.
+[08:35:30.481][VCOM] getZWaveBaudRate    Get the baudrate of the current Z-Wave channel.
+[08:35:30.484][VCOM] setZWaveNodeId      Sets Z-Wave NodeId.
+[08:35:30.490][VCOM] [uint16] nodeId
+[08:35:30.491][VCOM] setZWaveHomeId      Sets Z-Wave HomeId and its hash.
+[08:35:30.496][VCOM] [uint32] homeId
+[08:35:30.500][VCOM] [uint8] hash
+[08:35:30.505][VCOM] setZWaveOptions     Configure Z-Wave options.
+[08:35:30.506][VCOM] [uint8opt] optionsBitmask
+[08:35:30.514][VCOM] setZWaveLowPower    Set the transmit power for low-power ACKing.
+[08:35:30.519][VCOM] [int32] power: deci-dBm unless 'raw' is added
+[08:35:30.525][VCOM] [stringopt] 'raw'=units are raw power level
+[08:35:30.531][VCOM] getZWaveLowPower    Get the low power values (deci-dBm and raw).
+[08:35:30.536][VCOM] zwaveReceiveBeam    Run the Z-Wave beam detection algorithm.
+[08:35:30.541][VCOM] setMfmMode          Set MFM mode to enabled or disabled
+[08:35:30.545][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:30.550][VCOM] getMfmMode          Get the current MFM mod
+[08:35:30.551][VCOM] __________________
+[08:35:30.551][VCOM] ____RAIL_Timer____
+[08:35:30.556][VCOM] setTimer            Set the RAIL timer timeout.
+[08:35:30.562][VCOM] [uint32] timeout: per mode
+[08:35:30.566][VCOM] [string] 'rel'=Relative 'abs'=Absolute
+[08:35:30.573][VCOM] timerCancel         Cancel the RAIL timer if it is active.
+[08:35:30.578][VCOM] printTimerStats     Print current timer configuration.
+[08:35:30.583][VCOM] enableMultiTimer    Control the multiTimer API.
+[08:35:30.584][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:30.589][VCOM] setMultiTimer       Set a specific timer timeout.
+[08:35:30.594][VCOM] [uint8] timer: 0..(NUM_MULTI_TIMERS-1)
+[08:35:30.599][VCOM] [uint32] timeout: per mode
+[08:35:30.604][VCOM] [string] 'rel'=Relative 'abs'=Absolute
+[08:35:30.611][VCOM] multiTimerCancel    Cancel a specific timer if it is active.
+[08:35:30.615][VCOM] [uint8] timer: 0..(NUM_MULTI_TIMERS-1)
+[08:35:30.620][VCOM] getMultiTimerStats  Get information about a specific timer.
+[08:35:30.625][VCOM] [uint8] timer: 0..(NUM_MULTI_TIMERS-1)
+[08:35:30.633][VCOM] delayUs             Do a blocking delay for a specified time.
+[08:35:30.634][VCOM] [uint32] delayUs
+[08:35:30.638][VCOM] ____________________
+[08:35:30.638][VCOM] ____Auto_ACK_ing____
+[08:35:30.645][VCOM] autoAckConfig       Configure and enable auto-ACK functionality.
+[08:35:30.646][VCOM] [string] defaultState: 'idle'/'rx'
+[08:35:30.651][VCOM] [uint16] idleToRxUs
+[08:35:30.656][VCOM] [uint16] turnaroundTimeUs
+[08:35:30.661][VCOM] [uint16] ackTimeoutUs: to ACK's sync-detect
+[08:35:30.666][VCOM] autoAckDisable      Disable auto-ACK. Use autoAckConfig to reenable.
+[08:35:30.671][VCOM] setAckPayload       Set the ACK payload to transmit.
+[08:35:30.675][VCOM] [uint16] offset
+[08:35:30.680][VCOM] [uint8opt] byte0 byte1 ...
+[08:35:30.686][VCOM] setAckLength        Set how much data to load into the TXACK FIFO.
+[08:35:30.690][VCOM] [uint16] lengthBytes
+[08:35:30.696][VCOM] printAckPacket      Print the current TXACK payload data and byte length.
+[08:35:30.701][VCOM] getAutoAck          Get the current state of auto-ACKing.
+[08:35:30.705][VCOM] autoAckPause        Pause or Resume auto-ACKing
+[08:35:30.710][VCOM] [uint8] 1=PauseRx 0=ResumeRx
+[08:35:30.715][VCOM] [uint8] 1=PauseTx 0=ResumeTx
+[08:35:30.720][VCOM] setTxAckOptions     Control auto-ACK response for just the next receive.
+[08:35:30.725][VCOM] [uint8] 1=cancelAck 0=sendAck
+[08:35:30.730][VCOM] [uint8] 1=useTxBuf 0=useTxAckBuf
+[08:35:30.736][VCOM] setTxAckDirect      Control direct access to TXACK FIFO (RAIL_GetAutoAckFifo).
+[08:35:30.741][VCOM] [uint8] 0=indirect-access 1=direct-access
+[08:35:30.745][VCOM] ______________________
+[08:35:30.746][VCOM] ____GPIO_Functions____
+[08:35:30.750][VCOM] setGpioOutPin       Set a GPIO pin data out bit.
+[08:35:30.756][VCOM] [string] gpioPort: start from '0' or 'a' or 'A'
+[08:35:30.760][VCOM] [uint8] gpioPin
+[08:35:30.761][VCOM] [uint8] state: 0/1
+[08:35:30.766][VCOM] setAntDivPin        Set output pin for antenna diversity.
+[08:35:30.776][VCOM] [uint8] Antenna0 gpioPort (0=A, 1=B, etc.)
+[08:35:30.776][VCOM] [uint8] Antenna0 gpioPin
+[08:35:30.781][VCOM] [uint8] Antenna1 gpioPort (0=A, 1=B, etc.)
+[08:35:30.786][VCOM] [uint8] Antenna1 gpioPin
+[08:35:30.795][VCOM] [uint8opt] Antenna0 gpioPin State: 0=Disable [1=Enable]
+[08:35:30.801][VCOM] [uint8opt] Antenna1 gpioPin State: 0=Disable [1=Enable]
+[08:35:30.801][VCOM] ___________________________
+[08:35:30.807][VCOM] ____Diagnostic_and_Test____
+[08:35:30.811][VCOM] getConfigIndex      Get the index of the current multi-PHY radio config.
+[08:35:30.819][VCOM] See the entries in *channelConfigs[]. Start with index 0.
+[08:35:30.824][VCOM] setConfigIndex      Activate a multi-PHY radio configuration.
+[08:35:30.833][VCOM] See the entries in *channelConfigs[]. Start with index 0.
+[08:35:30.835][VCOM] [uint8] multiPhyIndex
+[08:35:30.841][VCOM] setCtune            Set the value of HFXO CTUNE. The radio must be IDLE.
+[08:35:30.845][VCOM] [uint16] ctune
+[08:35:30.850][VCOM] getCtune            Get the value of HFXO CTUNE
+[08:35:30.855][VCOM] setCtuneDelta       Set the value of HFXO CTUNE delta
+[08:35:30.856][VCOM] [uint16] delta
+[08:35:30.861][VCOM] getCtuneDelta       Get the value of HFXO CTUNE delta
+[08:35:30.866][VCOM] setPaCtune          Set the PACTUNE value for TX and RX.
+[08:35:30.870][VCOM] [uint8] txPaCtune
+[08:35:30.871][VCOM] [uint8] rxPaCtune
+[08:35:30.876][VCOM] enablePaCal         Control PA power calibration.
+[08:35:30.882][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:30.886][VCOM] setDebugSignal      Configure chip specific debug output.
+[08:35:30.891][VCOM] Use 'setDebugSignal help me' for more details.
+[08:35:30.896][VCOM] [string] pin
+[08:35:30.900][VCOM] [string] signal
+[08:35:30.901][VCOM] [uint16opt] signalOptions
+[08:35:30.910][VCOM] setDebugMode        Control Debug mode which allows freqOverride.
+[08:35:30.911][VCOM] [uint32] 0=Disable 1=Enable
+[08:35:30.920][VCOM] freqOverride        Set the radio frequency. Requires debug mode.
+[08:35:30.925][VCOM] [uint32] freqHz: Only small deviations from the
+[08:35:30.932][VCOM] current configuration are supported.
+[08:35:30.935][VCOM] configDirectMode    Configure direct mode
+[08:35:30.940][VCOM] [uint8] syncRx: 0=Disable 1=Enable
+[08:35:30.945][VCOM] [uint8] syncTx: 0=Disable 1=Enable
+[08:35:30.951][VCOM] [uint8] doutPort
+[08:35:30.953][VCOM] [uint8] doutPin
+[08:35:30.954][VCOM] [uint8] dclkPort
+[08:35:30.958][VCOM] [uint8] dclkPin
+[08:35:30.963][VCOM] [uint8] dinPort
+[08:35:30.964][VCOM] [uint8] dinPin
+[08:35:30.967][VCOM] [uint8opt] doutLoc
+[08:35:30.972][VCOM] [uint8opt] dclkLoc
+[08:35:30.975][VCOM] [uint8opt] dinLoc
+[08:35:30.980][VCOM] directMode          Control direct mode.
+[08:35:30.983][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:30.988][VCOM] directTx            Control TX in direct mode.
+[08:35:30.992][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:30.996][VCOM] txCancel            Start a TX that will be cancelled.
+[08:35:31.001][VCOM] [int32] delayUs: when to cancel it
+[08:35:31.006][VCOM] [uint8opt] stopMode: [0=RAIL_IDLE_ABORT] 1-3=RAIL_StopMode_t
+[08:35:31.011][VCOM] 4-7=4+RAIL_IdleMode_t
+[08:35:31.016][VCOM] getRandom           Get random data from the radio.
+[08:35:31.021][VCOM] [uint16] lengthBytes
+[08:35:31.026][VCOM] [uint8opt] [0=show them] 1=hide them
+[08:35:31.032][VCOM] setTxUnderflow      Control TX underflows by not loading the TX FIFO.
+[08:35:31.038][VCOM] [uint8] 1=Force underflows 0=Disable
+[08:35:31.044][VCOM] setRxOverflow       Control RX overflows by delaying in the event handler.
+[08:35:31.050][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:31.051][VCOM] [uint32opt] delayUs: [0]
+[08:35:31.057][VCOM] setCalibrations     Control calibrations.
+[08:35:31.060][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:31.065][VCOM] setTxTransitions    Set the TX state transitions.
+[08:35:31.070][VCOM] [string] txSuccess: 'idle'/'rx'
+[08:35:31.075][VCOM] [string] txError: 'idle'/'rx'
+[08:35:31.080][VCOM] setRxTransitions    Set the RX state transitions.
+[08:35:31.085][VCOM] [string] rxSuccess: 'idle'/'rx'/'tx'
+[08:35:31.088][VCOM] [string] rxError: 'idle'/'rx'/'tx'
+[08:35:31.093][VCOM] getTxTransitions    Get the TX state transitions.
+[08:35:31.098][VCOM] getRxTransitions    Get the RX state transitions.
+[08:35:31.103][VCOM] setNextTxRepeat     Set next transmit's automatic repeat count.
+[08:35:31.109][VCOM] [uint16] number of auto-repeated transmits after the first
+[08:35:31.118][VCOM] [uint32opt] delayUs inter-transmit or hop delay
+[08:35:31.119][VCOM] [uint32opt] channel (if hopping)
+[08:35:31.127][VCOM] repeat delayUs and channel for additional hops.
+[08:35:31.136][VCOM] configTxRepeatStartToStartSet tx repeat option to have tx repeats delaying from start of tx to start of tx.
+[08:35:31.144][VCOM] [uint8] 0 to disable, 1 to enable
+[08:35:31.148][VCOM] setNextBleTxRepeat  Set next transmit's automatic repeat count.
+[08:35:31.153][VCOM] [uint16] number of auto-repeated transmits after the first
+[08:35:31.160][VCOM] [uint32opt] delayUs inter-transmit or hop delay
+[08:35:31.166][VCOM] [uint32opt] phy railChannel logicalChannel accessAddress
+[08:35:31.171][VCOM] (a hop's config, repeat from delayUs for additional hops)
+[08:35:31.176][VCOM] setTxTimePos        Set desired TX timestamp position.
+[08:35:31.181][VCOM] [uint8] RAIL_PacketTimePosition_t
+[08:35:31.186][VCOM] setRxTimePos        Set desired RX timestamp position.
+[08:35:31.191][VCOM] [uint8] RAIL_PacketTimePosition_t
+[08:35:31.200][VCOM] setTimings          Set RAIL state transition timings (use -1 to keep same).
+[08:35:31.201][VCOM] [int32] idleToRxUs
+[08:35:31.206][VCOM] [int32] txToRxUs
+[08:35:31.209][VCOM] [int32] idleToTxUs
+[08:35:31.212][VCOM] [int32opt] rxToTxUs [0]
+[08:35:31.217][VCOM] [int32opt] rxSearchTimeoutUs [0]
+[08:35:31.221][VCOM] [int32opt] txToRxSearchTimeout [0]
+[08:35:31.226][VCOM] [int32opt] txToTx [0]
+[08:35:31.231][VCOM] forceAssert         Force a RAIL assert with the given error code.
+[08:35:31.236][VCOM] [uint32] RAIL_AssertErrorCodes_t
+[08:35:31.241][VCOM] getAppMode          Get the current RAILtest AppMode_t mode.
+[08:35:31.247][VCOM] getRadioState       Get the current RAIL_RadioState_t radio state.
+[08:35:31.251][VCOM] verifyRadio         Verify radio memory contents.
+[08:35:31.258][VCOM] [uint32] durationUs: time limit
+[08:35:31.265][VCOM] [uint8] 0=Resume if previously didn't finish 1=Restart
+[08:35:31.270][VCOM] [uint8] 0=current radio config 1=external radio config
+[08:35:31.277][VCOM] [uint8] 0=No callback 1=Use RAILCb_ConfigVerification
+[08:35:31.282][VCOM] getChannel          Get the current radio channel.
+[08:35:31.285][VCOM] setChannel          Set the radio channel.
+[08:35:31.290][VCOM] [uint16] channel
+[08:35:31.297][VCOM] setPktOffsetInTxFifo Set the offset in number of bytes of the Tx Data in Tx Fifo.
+[08:35:31.306][VCOM] [uint16opt] Offset in number of  bytes. If no parameter specified, command returns current active Offset
+[08:35:31.311][VCOM] reset               Perform a reboot of the chip.
+[08:35:31.316][VCOM] writeRmrStructure   Reserved for Simplicity Studio use only.
+[08:35:31.320][VCOM] [uint8]
+[08:35:31.321][VCOM] [uint16]
+[08:35:31.325][VCOM] [uint8]
+[08:35:31.326][VCOM] [uint32opt]
+[08:35:31.331][VCOM] updateConfigPtr     Reserved for Simplicity Studio use only.
+[08:35:31.335][VCOM] [uint8]
+[08:35:31.336][VCOM] [uint16]
+[08:35:31.341][VCOM] [uint8]
+[08:35:31.348][VCOM] reconfigureModem    Reserved for Simplicity Studio use only.
+[08:35:31.351][VCOM] printEvents         Show/Configure printing of RAIL events as they occur.
+[08:35:31.360][VCOM] [uint32opt] printEvents<31:0> printEvents<63:32>
+[08:35:31.365][VCOM] [uint32opt] mask<31:0> mask<63:32>
+[08:35:31.370][VCOM] printChipFeatures   Display RAIL features supported at compile and runtime.
+[08:35:31.377][VCOM] getmemw             Read count 32-bit words starting at address.
+[08:35:31.380][VCOM] [uint32] address
+[08:35:31.381][VCOM] [uint32opt] count
+[08:35:31.387][VCOM] setmemw             Write 32-bit values starting at address.
+[08:35:31.393][VCOM] [uint32] address
+[08:35:31.397][VCOM] [uint32opt] value0 value1 ...
+[08:35:31.400][VCOM] throughput          Throughput test.
+[08:35:31.402][VCOM] [uint32] number of packets
+[08:35:31.407][VCOM] setRssiOffset       Sets the RSSI offset.
+[08:35:31.409][VCOM] [int32] offsetDbm
+[08:35:31.415][VCOM] getRssiOffset       Gets the RSSI offset(s) in dBm.
+[08:35:31.421][VCOM] [uint8opt] [0=radio and protocol-specific] 1=radio only
+[08:35:31.427][VCOM] setRssiDetectThresholdSets the RSSI detect threshold.
+[08:35:31.434][VCOM] [int8] RSSI detect threshold (in dBm). (-128 disables detection)
+[08:35:31.439][VCOM] getRssiDetectThresholdGets the RSSI detect threshold(in dBm).
+[08:35:31.444][VCOM] txAt                Transmit a packet at a certain time.
+[08:35:31.454][VCOM] [uint32] time: per mode
+[08:35:31.454][VCOM] [stringopt] ['abs'=Absolute] 'rel'=Relative
+[08:35:31.460][VCOM] [stringopt] 'abort' RX if TX occurs during packet RX
+[08:35:31.466][VCOM] otherwise TX is delayed to end of RX
+[08:35:31.471][VCOM] setFreqOffset       Get/Set the frequency offset adjustment.
+[08:35:31.477][VCOM] [int32opt] RAIL_FrequencyOffset_t
+[08:35:31.481][VCOM] holdRx              Control holding of received packets.
+[08:35:31.490][VCOM] [uint8] [0=Process packets immediately] 1=Hold packets
+[08:35:31.495][VCOM] wait                Suspend processing of CLI input for a while.
+[08:35:31.496][VCOM] [uint32] waitTimeUs
+[08:35:31.505][VCOM] [stringopt] ['rel'=Relative] 'abs'=Absolute
+[08:35:31.510][VCOM] clearScript         Clear the script entered via enterScript.
+[08:35:31.511][VCOM] [uint8opt] [0=RAM] 1=Flash
+[08:35:31.520][VCOM] printScript         Print the script entered via enterScript.
+[08:35:31.521][VCOM] [uint8opt] [0=RAM] 1=Flash
+[08:35:31.527][VCOM] enterScript         Enter script entry mode.
+[08:35:31.531][VCOM] Conclude entry mode with text 'endScript'.
+[08:35:31.540][VCOM] [uint8opt] [0=RAM] 1=Flash-script will run on boot
+[08:35:31.545][VCOM] runScript           Run the script entered via enterScript.
+[08:35:31.550][VCOM] [uint8opt] [0=RAM] 1=Flash-script will run on boot
+[08:35:31.555][VCOM] setRetimeOption     Control retime options.
+[08:35:31.562][VCOM] [uint8] optionBitMask: 1=HFXO | 2=HFRCO | 4=DCDC | 8=LCD
+[08:35:31.570][VCOM] enable802154SignalIdentifier Enable Signal Identifier 2.4Ghz 802.15.4 signal detection
+[08:35:31.571][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:31.580][VCOM] enableBleSignalIdentifier Enable Signal Identifier for BLE signal detection
+[08:35:31.584][VCOM] [uint8] Mode 0=Disable 1=BLE1Mbps 2=BLE2Mbps
+[08:35:31.592][VCOM] getChannelConfigEntry   Get the maximum valid channelConfig index, the maximum
+[08:35:31.600][VCOM] valid channelConfigEntry index in the selected channelConfig
+[08:35:31.606][VCOM] and the parameters of the selected channelConfigEntry
+[08:35:31.610][VCOM] [uint8] channelConfig index
+[08:35:31.615][VCOM] [uint8] channelConfigEntry index
+[08:35:31.621][VCOM] deinitProtocol      Deinit the current protocol (BLE, 802.15.4, Z-Wave)
+[08:35:31.626][VCOM] enableCacheSynthCal Sequencer will start caching the calibration values on next
+[08:35:31.635][VCOM] state transition and use them instead of calibrating again
+[08:35:31.641][VCOM] for future state transitions. Recalibration will occur when
+[08:35:31.646][VCOM] needed (eg. protocol change, temperature change)
+[08:35:31.651][VCOM] [uint8] 0=Disable 1=Enable
+[08:35:31.657][VCOM] getWhiteningInitVal Returns the whitening initialization value.
+[08:35:31.662][VCOM] getCrcInitVal       Returns the CRC initialization value.
+[08:35:31.669][VCOM] setWhiteningInitVal Set the whitening initialization value.
+[08:35:31.674][VCOM] [uint16] Whitening initialization value.
+[08:35:31.680][VCOM] setCrcInitVal       Set the CRC initialization value.
+[08:35:31.685][VCOM] [uint32] CRC initialization value.
+[08:35:31.690][VCOM] resetWhiteningInitValReset the whitening initialization value to it's
+[08:35:31.695][VCOM] original setting from the Radio Configurator.
+[08:35:31.701][VCOM] resetCrcInitVal     Reset the CRC initialization value to it's
+[08:35:31.709][VCOM] original setting from the Radio Configurator.
+[08:35:31.709][VCOM] >

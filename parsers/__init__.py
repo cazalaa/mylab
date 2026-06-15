@@ -1,23 +1,23 @@
 """
 mylab parser system.
 
-Each parser implements feed(line) -> list[ParsedLine].
+A parser turns a stream of complete lines into *display blocks*:
 
-A ParsedLine dict:
-    {
-        "role"    : "cmd" | "response" | "event" | "boot" | "unknown" | "prompt",
-        "cmd"     : str | None,      # RAILtest command name (rx, tx, rxPacket, ...)
-        "display" : str,             # human-readable text
-        "color"   : str,             # "default" | "error" | "warning" | "success" | "boot" | "script"
-        "detail"  : str | None,      # expandable body (multi-response table, payload, boot details)
-        "raw"     : str,             # original line
-        "boot_id" : str | None,      # shared across boot sequence lines
-        "boot_first": bool,          # True for first line of boot group
-    }
+    {"kind": "cmd",   "cmd": "rx 1", "lines": [...], "ts": "..."}
+    {"kind": "event", "lines": [...],                "ts": "..."}
+    {"kind": "boot",  "lines": [...],                "ts": "..."}
+
+Parser API:
+    detect(line)                  -> bool          (used by AutoParser)
+    notify_cmd(cmd, ts, echo)     -> list[block]   (announce an outgoing command)
+    feed(line, ts)                -> list[block]   (one complete line in)
+    flush()                       -> list[block]   (close everything, on disconnect)
+    is_response_complete(lines)   -> bool          (used by board.cli())
+
+format_block(block) (see parsers.pretty) turns a block into the ready-to-render
+dict sent to the browser.
 """
-
 from __future__ import annotations
-import re
 
 PARSERS: dict[str, type["BaseParser"]] = {}
 
@@ -25,7 +25,7 @@ PARSERS: dict[str, type["BaseParser"]] = {}
 class _Meta(type):
     def __init__(cls, name, bases, ns):
         super().__init__(name, bases, ns)
-        if bases and cls.name != "base":
+        if bases and getattr(cls, "name", "base") != "base":
             PARSERS[cls.name] = cls
 
 
@@ -35,56 +35,56 @@ class BaseParser(metaclass=_Meta):
     def detect(self, line: str) -> bool:
         return False
 
-    def feed(self, line: str) -> list[dict]:
-        """Feed one complete line, return list of ParsedLine dicts."""
-        return [_unknown(line)]
+    def notify_cmd(self, cmd: str, ts: str = "", echo: bool = True) -> list[dict]:
+        return []
+
+    def feed(self, line: str, ts: str = "") -> list[dict]:
+        s = line.strip()
+        return [{"kind": "event", "lines": [s], "ts": ts}] if s else []
+
+    def flush(self) -> list[dict]:
+        return []
 
     def is_response_complete(self, lines: list[str]) -> bool:
         return False
 
 
-def _parsed(role, display, raw, cmd=None, color="default",
-            detail=None, boot_id=None, boot_first=False) -> dict:
-    return {
-        "role": role, "cmd": cmd, "display": display, "color": color,
-        "detail": detail, "raw": raw, "boot_id": boot_id, "boot_first": boot_first,
-    }
-
-def _unknown(raw): return _parsed("unknown", raw.strip(), raw)
-def _prompt(raw):  return _parsed("prompt",  raw.strip(), raw)
-
-
 class AutoParser(BaseParser):
+    """Thin wrapper that locks onto the RAILtest parser (the only protocol we
+    speak today) and forwards everything to it."""
     name = "auto"
 
     def __init__(self):
-        self._active: BaseParser = PARSERS["generic"]()
-        self._locked = False
+        self._active: BaseParser = PARSERS.get("railtest", PARSERS["generic"])()
 
     @property
-    def active_name(self): return self._active.name
+    def active_name(self):
+        return self._active.name
 
-    def _try_detect(self, line):
-        if self._locked: return
-        for pname, cls in PARSERS.items():
-            if pname in ("generic", "auto"): continue
-            if cls().detect(line):
-                self._active = cls()
-                self._locked = True
-                return
+    def detect(self, line):
+        return self._active.detect(line)
 
-    def feed(self, line):
-        self._try_detect(line)
-        return self._active.feed(line)
+    def notify_cmd(self, cmd, ts="", echo=True):
+        return self._active.notify_cmd(cmd, ts=ts, echo=echo)
+
+    def feed(self, line, ts=""):
+        return self._active.feed(line, ts=ts)
+
+    def flush(self):
+        return self._active.flush()
 
     def is_response_complete(self, lines):
         return self._active.is_response_complete(lines)
 
 
-def get_parser(name="auto"):
-    if name == "auto": return AutoParser()
+def get_parser(name: str = "auto") -> BaseParser:
+    name = (name or "auto").strip().lower()
+    if name == "auto":
+        return AutoParser()
     cls = PARSERS.get(name) or PARSERS.get("generic")
     return cls()
 
 
-from parsers import generic, railtest  # noqa
+# Register concrete parsers
+from parsers import generic, railtest  # noqa: E402,F401
+from parsers.pretty import format_block  # noqa: E402,F401
