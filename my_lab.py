@@ -1868,6 +1868,9 @@ class Board:
         self._admin_le    = b"\r\n"
         self._admin_echo  = False
         self._admin_prompt = ">"
+        # None = unknown, True = console responded, False = no admin console
+        # (some USB adapters accept the TCP connection but have no admin CLI).
+        self._admin_alive = None
 
         self._vcom_listeners  = []
         self._admin_listeners = []
@@ -2108,6 +2111,13 @@ class Board:
         if not self._admin_sock:
             return ""
 
+        # If a previous call already proved this adapter has no admin console,
+        # don't block for `timeout` again — return immediately.
+        if self._admin_alive is False:
+            self._send_admin_raw(raw)  # still forward it, in case it matters
+            print(f"[ADM] {self.nickname or self.serial} (no admin console — not waiting)")
+            return ""
+
         # Register listener BEFORE sending the command to avoid missing
         # responses that arrive immediately (race condition on fast/USB boards)
         event    = threading.Event()
@@ -2131,6 +2141,14 @@ class Board:
         self._admin_listeners.remove(on_data)
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         timed_out = not event.is_set()
+        if timed_out:
+            # First proof that this adapter has no working admin console.
+            if self._admin_alive is None:
+                print(f"[ADM] {self.nickname or self.serial} — admin console "
+                      f"silent; marking admin unavailable for this board.")
+            self._admin_alive = False
+        else:
+            self._admin_alive = True
         print(f"[ADM] {self.nickname or self.serial} {ts} <<< {'TIMEOUT' if timed_out else 'ok'}")
         return "".join(response)
 
