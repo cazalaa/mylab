@@ -160,6 +160,7 @@ def stop_sdm():
 def restart_sdm():
     """Stop then start SDM to kill any lingering Silink instances."""
     print("[INFO] Restarting SDM to clean up Silink instances...")
+    invalidate_connections()
     if is_sdm_running():
         stop_sdm()
     start_sdm()
@@ -171,6 +172,7 @@ def restart_sdm():
     print("[WARN] SDM did not start in time.")
 
 def clear_and_scan():
+    invalidate_connections()
     requests.post(f"{SDM_BASE}/api/adapter/clear-and-scan")
 
 def get_adapters():
@@ -195,10 +197,13 @@ def extract_board(a):
 def run_commander(cmd, serial):
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        invalidate_connections(serial)
         return {"serialNumber": serial, "ok": True, "output": result.stdout}
     except subprocess.CalledProcessError as e:
+        invalidate_connections(serial)
         return {"serialNumber": serial, "ok": False, "error": e.stderr or str(e)}
     except Exception as e:
+        invalidate_connections(serial)
         return {"serialNumber": serial, "ok": False, "error": str(e)}
 
 @app.route("/sdm/ui", methods=["POST"])
@@ -272,39 +277,117 @@ def fw_upgrade():
 # list-connections is called AT MOST ONCE per serial per app session — further
 # calls use get-info so no extra Silink instances are spawned.
 # ─────────────────────────────────────────────────────────────────────────────
-_silink_started: set = set()   # serials for which list-connections was called
 
-def get_connections(serial_number: str, timeout: int = 8) -> dict:
+# -----------------------------------------------------------------------------
+# USB / SDM / Silink connection handling
+# -----------------------------------------------------------------------------
+# Important distinction:
+#   - adapter identity: USB uses serialNumber, IP adapters use their real IP
+#   - socket endpoint: USB uses 127.0.0.1 plus dynamic Silink ports
+# Never store/use 127.0.0.1 as the identity of a USB adapter.
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_connection_cache: dict[str, dict] = {}
+_connection_locks: dict[str, threading.Lock] = {}
+_connection_locks_guard = threading.Lock()
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    return str(host or "").strip().lower() in _LOOPBACK_HOSTS
+
+
+def invalidate_connections(serial_number: str | None = None) -> None:
+    """Drop cached SDM/Silink connection info.
+
+    Call this after scan/flash/recover/erase/SDM restart, because USB Silink
+    localhost ports can change when the Silink process is recreated.
     """
-    Call list-connections the first time (starts Silink for USB boards), then
-    use get-info for subsequent calls so only one Silink instance is spawned.
-    list-connections may return either a dict {adapter, connections} or a bare
-    list of connections — normalize to dict in both cases.
+    with _connection_locks_guard:
+        if serial_number:
+            _connection_cache.pop(str(serial_number), None)
+        else:
+            _connection_cache.clear()
+
+
+def _connection_lock(serial_number: str) -> threading.Lock:
+    serial_number = str(serial_number)
+    with _connection_locks_guard:
+        return _connection_locks.setdefault(serial_number, threading.Lock())
+
+
+def _ports_from(data: dict) -> dict:
+    conns = data.get("connections", []) if isinstance(data, dict) else []
+    return {c.get("portName"): c.get("portNumber") for c in conns if isinstance(c, dict)}
+
+
+def _normalize_connections(data, serial_number: str) -> dict:
+    """Normalize SDM responses.
+
+    Some SDM versions return a bare list from list-connections; most return
+    {adapter, connections}. This function always returns the dict shape.
     """
-    if serial_number not in _silink_started:
-        url = f"{SDM_BASE}/api/adapter/{serial_number}/list-connections"
+    if isinstance(data, list):
         try:
-            r = requests.get(url, timeout=timeout)
-            r.raise_for_status()
-            data = r.json()
-            _silink_started.add(serial_number)
-            print(f"[INFO] list-connections {serial_number}: Silink started")
-            # Normalize: some SDM versions return a bare list of connections
-            if isinstance(data, list):
-                # Fetch adapter info separately to get host, connectivityType etc.
-                try:
-                    info = requests.get(f"{SDM_BASE}/api/adapter/{serial_number}/get-info", timeout=5).json()
-                    data = {"adapter": info.get("adapter", {}), "connections": data}
-                except Exception:
-                    data = {"adapter": {}, "connections": data}
-            return data
-        except Exception as e:
-            print(f"[WARN] list-connections {serial_number}: {e} — falling back to get-info")
+            info = requests.get(
+                f"{SDM_BASE}/api/adapter/{serial_number}/get-info",
+                timeout=5,
+            ).json()
+            return {"adapter": info.get("adapter", {}), "connections": data}
+        except Exception:
+            return {"adapter": {}, "connections": data}
+    if isinstance(data, dict):
+        return data
+    return {"adapter": {}, "connections": []}
 
-    # Already started (or list-connections failed) → just read current state
+
+def _sdm_get_info(serial_number: str) -> dict:
     r = requests.get(f"{SDM_BASE}/api/adapter/{serial_number}/get-info", timeout=5)
     r.raise_for_status()
-    return r.json()
+    return _normalize_connections(r.json(), serial_number)
+
+
+def _sdm_list_connections(serial_number: str, timeout: int = 8) -> dict:
+    r = requests.get(
+        f"{SDM_BASE}/api/adapter/{serial_number}/list-connections",
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    return _normalize_connections(r.json(), serial_number)
+
+
+def get_connections(serial_number: str, timeout: int = 8,
+                    force: bool = False, start: bool = True) -> dict:
+    """Return SDM connection info for one adapter.
+
+    start=True  : ensure Silink is started for USB boards if ports are missing.
+    start=False : only inspect current SDM state; do not spawn Silink just to
+                  render adapter cards.
+    force=True  : ignore cached data and ask SDM/list-connections again.
+    """
+    serial_number = str(serial_number)
+    with _connection_lock(serial_number):
+        if not force:
+            try:
+                info = _sdm_get_info(serial_number)
+                ports = _ports_from(info)
+                if ports.get("serial1") or ports.get("admin") or not start:
+                    _connection_cache[serial_number] = info
+                    return info
+            except Exception as e:
+                print(f"[WARN] get-info {serial_number}: {e}")
+
+            cached = _connection_cache.get(serial_number)
+            if cached:
+                ports = _ports_from(cached)
+                if ports.get("serial1") or ports.get("admin") or not start:
+                    return cached
+
+        if not start:
+            return _connection_cache.get(serial_number, {"adapter": {}, "connections": []})
+
+        data = _sdm_list_connections(serial_number, timeout=timeout)
+        _connection_cache[serial_number] = data
+        print(f"[INFO] list-connections {serial_number}: { _ports_from(data) }")
+        return data
 
 @app.route("/")
 def index():
@@ -360,17 +443,19 @@ def adapters():
         if not serial:
             continue
 
-        # Check ttyMode via get-info connections array
-        tty_mode = True
+        # Do not start Silink just to render adapter cards. USB boards are still
+        # controlled through Silink later, when a terminal/admin command/run needs it.
+        tty_mode = False
         try:
-            info    = get_connections(serial, timeout=8)
+            info    = get_connections(serial, timeout=3, start=False)
             conns   = info.get("connections", [])
-            ports   = {c["portName"]: c["portNumber"] for c in conns}
-            tty_mode = not ports.get("serial1")
+            ports   = {c.get("portName"): c.get("portNumber") for c in conns}
+            if a.get("connectivityType") != "usb":
+                tty_mode = not ports.get("serial1")
             print(f"[INFO] get-info {ports}")
         except Exception as e:
             print(f"[WARN] get-info {serial}: {e}")
-            tty_mode = False  # safe fallback — show buttons
+            tty_mode = False  # safe fallback: keep manual-control buttons visible
 
         result.append({
             "serialNumber":     serial,
@@ -490,7 +575,7 @@ def terminal_run_script():
 
             if not vcom_sock or not admin_sock:
                 # Sockets not yet open — connect fresh
-                info         = get_connections(serial)
+                info         = get_connections(serial, force=True)
                 adapter      = info.get("adapter", {})
                 conns        = info.get("connections", [])
                 ports        = {c["portName"]: c["portNumber"] for c in conns}
@@ -541,42 +626,59 @@ def terminal_run_script():
     return jsonify({"ok": True})
 
 
-@app.route("/api/terminal-info/<serial>")
-def terminal_info(serial):
+
+@app.route("/api/terminal-info/<serial_number>")
+def terminal_info(serial_number):
     try:
-        data       = get_connections(serial)
+        data       = get_connections(serial_number, force=True)
         adapter    = data.get("adapter", {})
 
         connectivity = adapter.get("connectivityType", "usb")
         host = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
 
         conns_list = data.get("connections", [])
-        ports      = {c["portName"]: c["portNumber"] for c in conns_list}
+        ports      = {c.get("portName"): c.get("portNumber") for c in conns_list}
 
         vcom_port  = ports.get("serial1")
         admin_port = ports.get("admin")
-        print(f"[INFO] terminal-info {serial}: vcom={vcom_port} admin={admin_port}")
+        print(f"[INFO] terminal-info {serial_number}: vcom={vcom_port} admin={admin_port}")
 
-        # Si pas de ports réseau → chercher port série USB (cross-platform)
+        def find_usb_tty():
+            try:
+                import serial.tools.list_ports as list_ports
+                for port in list_ports.comports():
+                    if serial_number.lower() in (port.serial_number or "").lower():
+                        return port.device
+            except Exception as e:
+                print(f"[WARN] list_ports {serial_number}: {e}")
+            return None
+
         tty_path = None
-        if not vcom_port and connectivity == "usb":
-            for port in serial.tools.list_ports.comports():
-                if serial.lower() in (port.serial_number or "").lower():
-                    tty_path = port.device
-                    break
+        if connectivity == "usb" and not vcom_port:
+            tty_path = find_usb_tty()
+
+        if connectivity == "usb" and (not vcom_port or not admin_port) and not tty_path:
+            return jsonify({
+                "error": (
+                    "SDM/Silink did not return both serial1 and admin ports. "
+                    "Refresh the adapter list, restart SDM, or reconnect the USB adapter. "
+                    "Do not use 127.0.0.1 as the scenario connection; use the USB serial number."
+                )
+            }), 503
 
         return jsonify({
-            "serial":       serial,
-            "host":         host,
-            "vcom":         vcom_port,
-            "admin":        admin_port,
-            "tty":          tty_path,
-            "connectivity": connectivity,
-            "label":        adapter.get("label", serial),
-            "nickname":     adapter.get("nickname", ""),
+            "serial":          serial_number,
+            "host":            host,
+            "vcom":            vcom_port,
+            "admin":           admin_port,
+            "tty":             tty_path,
+            "connectivity":    connectivity,
+            "admin_available": bool(admin_port),
+            "label":           adapter.get("label", serial_number),
+            "nickname":        adapter.get("nickname", ""),
         })
     except Exception as e:
-        print(f"[ERROR] terminal-info {serial}: {e}")
+        print(f"[ERROR] terminal-info {serial_number}: {e}")
         return jsonify({"error": str(e)}), 500
 
 # ── WebSocket telnet bridge ────────────────────────
@@ -645,10 +747,21 @@ def handle_connect_telnet(data):
     print(f"[TELNET] connect request: room={room} host={host} port={port}")
     join_room(room)
 
-    if room in active_telnets:
-        print(f"[TELNET] already connected: {room}")
-        emit("terminal_ready", {"room": room})
-        return  # déjà connecté
+    existing = active_telnets.get(room)
+    if existing:
+        try:
+            existing.send(b"")
+            print(f"[TELNET] already connected: {room}")
+            emit("terminal_ready", {"room": room})
+            return
+        except Exception:
+            print(f"[TELNET] stale socket removed: {room}")
+            try:
+                existing.close()
+            except Exception:
+                pass
+            active_telnets.pop(room, None)
+            active_boards.pop(room, None)
 
     try:
         tn = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
@@ -750,12 +863,36 @@ def handle_connect_telnet(data):
                                       {**format_block(block), "room": room}, room=room)
                 except Exception:
                     pass
+            try:
+                tn.close()
+            except Exception:
+                pass
+            if active_telnets.get(room) is tn:
+                active_telnets.pop(room, None)
+            if active_boards.get(room):
+                active_boards.pop(room, None)
             socketio.emit("terminal_closed", {"room": room}, room=room)
         threading.Thread(target=reader, daemon=True).start()
         emit("terminal_ready", {"room": room})
         print(f"[TELNET] terminal_ready emitted: {room}")
 
     except Exception as e:
+        if not data.get("_refreshed"):
+            try:
+                serial_id, kind = room.rsplit("_", 1)
+                fresh_info = get_connections(serial_id, force=True)
+                fresh_adapter = fresh_info.get("adapter", {})
+                fresh_ports = _ports_from(fresh_info)
+                fresh_connectivity = fresh_adapter.get("connectivityType", "usb")
+                fresh_host = fresh_adapter.get("host", "127.0.0.1") if fresh_connectivity != "usb" else "127.0.0.1"
+                fresh_port = fresh_ports.get("serial1" if kind == "vcom" else "admin")
+                if fresh_port:
+                    retry = dict(data)
+                    retry.update({"host": fresh_host, "port": str(fresh_port), "_refreshed": True})
+                    print(f"[TELNET] retry with refreshed SDM port: {room} {fresh_host}:{fresh_port}")
+                    return handle_connect_telnet(retry)
+            except Exception as refresh_error:
+                print(f"[TELNET] refresh after connection failure failed: {room}: {refresh_error}")
         print(f"[TELNET] connection failed: {room}: {e}")
         emit("terminal_error", {"message": str(e)})
 
@@ -763,6 +900,7 @@ def handle_connect_telnet(data):
 def handle_disconnect_telnet(data):
     room = data.get("room")
     tn   = active_telnets.pop(room, None)
+    active_boards.pop(room, None)
     if tn:
         try: tn.close()
         except: pass
@@ -922,6 +1060,7 @@ def adapter_erase(serial):
             conn_flag = ["--ip", adapter.get("host", "")]
         cmd = [COMMANDER_PATH, "device", "masserase"] + conn_flag
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        invalidate_connections(serial)
         ok = result.returncode == 0
         return jsonify({"ok": ok, "msg": result.stderr.strip() if not ok else ""})
     except Exception as e:
@@ -944,6 +1083,7 @@ def adapter_flash(serial):
             conn_flag = ["--ip", adapter.get("host", "")]
         cmd = [COMMANDER_PATH, "flash", path] + conn_flag
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        invalidate_connections(serial)
         ok = result.returncode == 0
         return jsonify({"ok": ok, "msg": result.stderr.strip() if not ok else ""})
     except Exception as e:
@@ -959,7 +1099,7 @@ def admin_cmd(serial):
     if not tn:
         # Try to connect on demand using terminal-info
         try:
-            data    = get_connections(serial)
+            data    = get_connections(serial, force=True)
             adapter = data.get("adapter", {})
             conns   = data.get("connections", [])
             ports   = {c["portName"]: c["portNumber"] for c in conns}
@@ -1155,7 +1295,7 @@ def scenario_check():
 
     # Build adapter lookup maps
     # host → adapter, serialNumber → adapter
-    adapter_by_host   = {a.get("host"):         a for a in adapters_data if a.get("host")}
+    adapter_by_host   = {a.get("host"):         a for a in adapters_data if a.get("host") and not _is_loopback_host(a.get("host"))}
     adapter_by_serial = {a.get("serialNumber"):  a for a in adapters_data if a.get("serialNumber")}
 
     def is_valid_ip(s):
@@ -1227,6 +1367,8 @@ def scenario_check():
         if connection.lower() in ("none", ""):
             connection = "usb"
         matched_adapter = None
+        if _is_loopback_host(connection):
+            issue("connection", "127.0.0.1/localhost is a local Silink transport host, not a USB adapter identity. Use 'usb' or the adapter serial number.")
 
         if connection != "usb":
             if not is_valid_ip(connection) and not is_valid_serial(connection):
@@ -1695,7 +1837,26 @@ class Board:
             else:
                 s = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
                 s.settimeout(5)
-                s.connect((self.host, port))
+                try:
+                    s.connect((self.host, port))
+                except OSError:
+                    if _is_loopback_host(self.host):
+                        fresh_info = get_connections(self.serial, force=True)
+                        fresh_ports = _ports_from(fresh_info)
+                        port_name = "serial1" if room.endswith("_vcom") else "admin"
+                        refreshed_port = fresh_ports.get(port_name)
+                        if refreshed_port:
+                            port = int(refreshed_port)
+                            if room.endswith("_vcom"):
+                                self.vcom_port = port
+                            else:
+                                self.admin_port = port
+                            print(f"[RUN] retry {room} with refreshed port {self.host}:{port}")
+                            s.connect((self.host, port))
+                        else:
+                            raise
+                    else:
+                        raise
                 s.settimeout(None)
                 active_telnets[room] = s
                 setattr(self, attr, s)
@@ -2063,7 +2224,7 @@ def get_log_file(serial):
 def _flash_board(board_cfg, scenario_dir, run_id=None):
     serial     = board_cfg.get("_resolved_serial", "")
     connection = str(board_cfg.get("connection", board_cfg.get("jlink_name_or_ip", "usb"))).strip()
-    if connection.lower() in ("usb", "none", ""):
+    if connection.lower() in ("usb", "none", "") or _is_loopback_host(connection):
         connection = "usb"
     print(f"[RUN] _flash_board serial={serial} connection={connection}")
 
@@ -2091,6 +2252,7 @@ def _flash_board(board_cfg, scenario_dir, run_id=None):
         print(f"[RUN] running: {' '.join(cmd)}")
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            invalidate_connections(serial)
             log.append(" ".join(cmd))
             print(f"[RUN] returncode={result.returncode} stdout={result.stdout[:100]} stderr={result.stderr[:100]}")
             if result.returncode != 0:
@@ -2173,7 +2335,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
     # Get ports
     emit_status("connecting")
     try:
-        info    = get_connections(serial)
+        info    = get_connections(serial, force=True)
         adapter = info.get("adapter", {})
         conns   = info.get("connections", [])
         ports   = {c["portName"]: c["portNumber"] for c in conns}
@@ -2253,7 +2415,7 @@ def scenario_run():
         adapters_data = requests.get(f"{SDM_BASE}/api/adapters", timeout=3).json()
         if isinstance(adapters_data, dict):
             adapters_data = adapters_data.get("adapters", [])
-        adapter_by_host   = {a.get("host"): a for a in adapters_data if a.get("host")}
+        adapter_by_host   = {a.get("host"): a for a in adapters_data if a.get("host") and not _is_loopback_host(a.get("host"))}
         adapter_by_serial = {a.get("serialNumber"): a for a in adapters_data if a.get("serialNumber")}
     except Exception as e:
         return jsonify({"ok": False, "error": f"Cannot reach SDM: {e}"}), 500
@@ -2261,10 +2423,15 @@ def scenario_run():
     # Resolve each board entry
     resolved_boards = []
     for b in boards_cfg:
-        # connection: usb (default) or IP address
+        # connection: usb (default), USB serial number, or real external IP address
         connection = str(b.get("connection", b.get("jlink_name_or_ip", "usb"))).strip()
         if connection.lower() in ("usb", "none", ""):
             connection = "usb"
+        if _is_loopback_host(connection):
+            return jsonify({
+                "ok": False,
+                "error": "Do not use 127.0.0.1/localhost as a scenario connection. Use 'usb' or the USB adapter serial number."
+            }), 400
 
         if connection != "usb":
             adapter = adapter_by_host.get(connection) or adapter_by_serial.get(connection)
@@ -2392,7 +2559,7 @@ def scenario_run():
                               {"serial": serial, "status": "connecting"},
                               room=run_room)
                 try:
-                    info    = get_connections(serial)
+                    info    = get_connections(serial, force=True)
                     adapter = info.get("adapter", {})
                     conns   = info.get("connections", [])
                     ports   = {c["portName"]: c["portNumber"] for c in conns}
@@ -2494,7 +2661,7 @@ def scenario_run():
                               {"serial": serial, "status": "connecting"},
                               room=run_room)
                 try:
-                    info    = get_connections(serial)
+                    info    = get_connections(serial, force=True)
                     adapter = info.get("adapter", {})
                     conns   = info.get("connections", [])
                     ports   = {c["portName"]: c["portNumber"] for c in conns}

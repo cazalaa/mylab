@@ -549,8 +549,11 @@ function sc2ImportGroup(gdata) {
 
     let added = 0, skipped = 0;
     (gdata.adapters || []).forEach(a => {
-        const isIP      = a.connectivityType !== "usb";
-        const conn      = isIP && a.host ? a.host.trim().toLowerCase() : "";
+        const isUSB     = a.connectivityType === "usb";
+        const isIP      = !isUSB;
+        const conn      = isUSB
+            ? (a.serialNumber || "").trim().toLowerCase()
+            : (a.host || "").trim().toLowerCase();
         const nick      = (a.nickname || "").trim().toLowerCase();
         const boardShort = a.boardId ? a.boardId.replace(/^BRD/i,"") : "";
 
@@ -561,7 +564,7 @@ function sc2ImportGroup(gdata) {
         sc2Scenario.boards.push({
             nickname:      a.nickname || "",
             board:         boardShort,
-            connection:    isIP && a.host ? a.host : "",
+            connection:    isUSB ? (a.serialNumber || "") : (a.host || ""),
             s37_files:     [],
             script:        "",
             masserase:     true,
@@ -648,7 +651,7 @@ function sc2BuildSections() {
                 </div>
                 <div class="sc-sf-row">
                     <label class="sc-sf-label">Connection</label>
-                    <input class="sc-sf-input" id="sc2-conn-${i}" value="${sc2Esc(conn)}" placeholder="IP or empty for USB">
+                    <input class="sc-sf-input" id="sc2-conn-${i}" value="${sc2Esc(conn)}" placeholder="IP or USB serial; empty = any USB">
                 </div>
                 <div class="sc-sf-row">
                     <label class="sc-sf-label">S37 files</label>
