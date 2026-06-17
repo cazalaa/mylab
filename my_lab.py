@@ -389,6 +389,74 @@ def get_connections(serial_number: str, timeout: int = 8,
         print(f"[INFO] list-connections {serial_number}: { _ports_from(data) }")
         return data
 
+
+# -----------------------------------------------------------------------------
+# Unique source of truth for "where do we connect for this board?"
+# -----------------------------------------------------------------------------
+# USB and IP differ in exactly ONE thing: the host.
+#   - USB : host is ALWAYS 127.0.0.1, ports come from Silink (serial1 / admin)
+#   - IP  : host is the board's real address, ports come from SDM
+# Everything downstream (sockets, reader, parser, listeners, scripts) is then
+# identical. No code path should ever re-derive host/ports by hand again.
+# -----------------------------------------------------------------------------
+class EndpointError(RuntimeError):
+    """Raised when SDM/Silink cannot give us both serial1 and admin ports."""
+    pass
+
+
+def resolve_endpoint(serial_number, *, force=False, start=True):
+    """Return a normalized endpoint, identical shape for USB and IP:
+
+        {
+          "serial": str,
+          "connectivity": "usb" | "ethernet" | ...,
+          "host": str,            # USB -> "127.0.0.1" ; IP -> real host
+          "vcom_port": int,       # Silink serial1 (USB) / board VCOM (IP)
+          "admin_port": int,      # Silink admin
+          "adapter": dict,        # raw SDM adapter record
+        }
+
+    Raises EndpointError if either port is missing, instead of silently
+    degrading USB to a raw /dev/tty connection. The TTY fallback is offered
+    explicitly elsewhere (manual, never automatic).
+    """
+    info    = get_connections(serial_number, force=force, start=start)
+    adapter = info.get("adapter", {}) if isinstance(info, dict) else {}
+    ports   = _ports_from(info)
+    is_usb  = adapter.get("connectivityType", "usb") == "usb"
+
+    ep = {
+        "serial":       str(serial_number),
+        "connectivity": adapter.get("connectivityType", "usb"),
+        "host":         "127.0.0.1" if is_usb else adapter.get("host", ""),
+        "vcom_port":    ports.get("serial1"),
+        "admin_port":   ports.get("admin"),
+        "adapter":      adapter,
+    }
+    if not ep["vcom_port"] or not ep["admin_port"]:
+        raise EndpointError(
+            f"Silink/SDM n'a pas fourni serial1+admin pour {serial_number} "
+            f"(serial1={ep['vcom_port']} admin={ep['admin_port']}). "
+            f"Re-scanner, redémarrer SDM ou rebrancher la carte."
+        )
+    return ep
+
+
+def _find_usb_tty(serial_number):
+    """Best-effort: locate the /dev/tty*|/dev/cu* device for a USB serial.
+
+    Only used to *offer* a manual TTY fallback button — never to auto-connect.
+    """
+    try:
+        import serial.tools.list_ports as list_ports
+        for port in list_ports.comports():
+            if str(serial_number).lower() in (port.serial_number or "").lower():
+                return port.device
+    except Exception as e:
+        print(f"[WARN] list_ports {serial_number}: {e}")
+    return None
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -574,23 +642,17 @@ def terminal_run_script():
             admin_sock = active_telnets.get(f"{serial}_admin")
 
             if not vcom_sock or not admin_sock:
-                # Sockets not yet open — connect fresh
-                info         = get_connections(serial, force=True)
-                adapter      = info.get("adapter", {})
-                conns        = info.get("connections", [])
-                ports        = {c["portName"]: c["portNumber"] for c in conns}
-                connectivity = adapter.get("connectivityType", "usb")
-                host         = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
-                vcom_port    = ports.get("serial1")
-                admin_port   = ports.get("admin")
-                if not vcom_port or not admin_port:
-                    emit_out("✗ Could not get board ports from SDM", "red")
+                # Sockets not yet open — connect fresh (same path for USB & IP)
+                try:
+                    ep = resolve_endpoint(serial, force=True)
+                except EndpointError as e:
+                    emit_out(f"✗ {e}", "red")
                     return
                 board_obj = Board(
                     serial       = serial,
-                    host         = host,
-                    vcom_port    = vcom_port,
-                    admin_port   = admin_port,
+                    host         = ep["host"],
+                    vcom_port    = ep["vcom_port"],
+                    admin_port   = ep["admin_port"],
                     run_id       = None,
                     scenario_dir = "",
                 )
@@ -630,56 +692,36 @@ def terminal_run_script():
 @app.route("/api/terminal-info/<serial_number>")
 def terminal_info(serial_number):
     try:
-        data       = get_connections(serial_number, force=True)
-        adapter    = data.get("adapter", {})
-
-        connectivity = adapter.get("connectivityType", "usb")
-        host = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
-
-        conns_list = data.get("connections", [])
-        ports      = {c.get("portName"): c.get("portNumber") for c in conns_list}
-
-        vcom_port  = ports.get("serial1")
-        admin_port = ports.get("admin")
-        print(f"[INFO] terminal-info {serial_number}: vcom={vcom_port} admin={admin_port}")
-
-        def find_usb_tty():
-            try:
-                import serial.tools.list_ports as list_ports
-                for port in list_ports.comports():
-                    if serial_number.lower() in (port.serial_number or "").lower():
-                        return port.device
-            except Exception as e:
-                print(f"[WARN] list_ports {serial_number}: {e}")
-            return None
-
-        tty_path = None
-        if connectivity == "usb" and not vcom_port:
-            tty_path = find_usb_tty()
-
-        if connectivity == "usb" and (not vcom_port or not admin_port) and not tty_path:
-            return jsonify({
-                "error": (
-                    "SDM/Silink did not return both serial1 and admin ports. "
-                    "Refresh the adapter list, restart SDM, or reconnect the USB adapter. "
-                    "Do not use 127.0.0.1 as the scenario connection; use the USB serial number."
-                )
-            }), 503
-
+        ep = resolve_endpoint(serial_number, force=True)
+    except EndpointError as e:
+        # Default 127.0.0.1+Silink path is unavailable. Do NOT auto-connect to
+        # /dev/tty. Report a TTY candidate so the UI can offer an EXPLICIT,
+        # manual fallback button (USB only); IP boards get no candidate.
+        tty_candidate = _find_usb_tty(serial_number)
+        print(f"[INFO] terminal-info {serial_number}: no silink ports "
+              f"(tty_candidate={tty_candidate})")
         return jsonify({
-            "serial":          serial_number,
-            "host":            host,
-            "vcom":            vcom_port,
-            "admin":           admin_port,
-            "tty":             tty_path,
-            "connectivity":    connectivity,
-            "admin_available": bool(admin_port),
-            "label":           adapter.get("label", serial_number),
-            "nickname":        adapter.get("nickname", ""),
-        })
+            "error":         str(e),
+            "tty_candidate": tty_candidate,
+            "serial":        serial_number,
+        }), 503
     except Exception as e:
         print(f"[ERROR] terminal-info {serial_number}: {e}")
         return jsonify({"error": str(e)}), 500
+
+    adapter = ep["adapter"]
+    print(f"[INFO] terminal-info {serial_number}: "
+          f"host={ep['host']} vcom={ep['vcom_port']} admin={ep['admin_port']}")
+    return jsonify({
+        "serial":          serial_number,
+        "host":            ep["host"],
+        "vcom":            ep["vcom_port"],
+        "admin":           ep["admin_port"],
+        "connectivity":    ep["connectivity"],
+        "admin_available": bool(ep["admin_port"]),
+        "label":           adapter.get("label", serial_number),
+        "nickname":        adapter.get("nickname", ""),
+    })
 
 # ── WebSocket telnet bridge ────────────────────────
 active_telnets = {}   # room_id -> socket
@@ -789,14 +831,15 @@ def handle_connect_telnet(data):
                 f.write(f"# Board: {serial_id}  Host: {host}  Port: {port}\n")
             _room_parsers[f"{serial_id}_session_log"] = session_log
 
-        # Raw TCP log file — VCOM only
-        raw_log_path = None
-        if is_vcom:
-            import os as _os
-            raw_log_path = _os.path.join("logs", f"{serial_id}_raw_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_vcom.log")
-            _os.makedirs("logs", exist_ok=True)
-            with open(raw_log_path, "w") as _rf:
-                _rf.write(f"# room={room} host={data.get('host','?')} port={data.get('port','?')}\n")
+        # Raw TCP log file — one per channel (VCOM and ADMIN)
+        import os as _os
+        _chan = "vcom" if is_vcom else "admin"
+        raw_log_path = _os.path.join(
+            "logs",
+            f"{serial_id}_raw_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{_chan}.log")
+        _os.makedirs("logs", exist_ok=True)
+        with open(raw_log_path, "w") as _rf:
+            _rf.write(f"# room={room} host={data.get('host','?')} port={data.get('port','?')}\n")
 
         def reader():
             print(f"[TELNET] reader started: {room}")
@@ -907,31 +950,67 @@ def handle_disconnect_telnet(data):
 
 @socketio.on("connect_tty")
 def handle_connect_tty(data):
+    """EXPLICIT, MANUAL USB fallback — raw /dev/tty, VCOM only, no ADMIN.
+
+    Never triggered automatically: the UI only emits this after the user
+    presses the TTY-fallback button (shown when Silink failed to provide
+    ports). The reader is parser-aware so Modern View and cli() listeners
+    behave like the normal TCP path on this single VCOM channel.
+    """
     room     = data["room"]
     tty_path = data["tty"]
     join_room(room)
 
     if room in active_telnets:
+        emit("terminal_ready", {"room": room})
         return
 
     try:
         ser = serial.Serial(tty_path, baudrate=115200, timeout=0)
         active_telnets[room] = ser
 
+        # Per-room parser + line buffer so Modern View blocks render here too
+        _room_parsers[room] = get_parser(TERMINAL_PARSER)
+        parse_line_buf = [""]
+
         def reader():
+            buf = []
+            room_parser = _room_parsers.get(room)
             while True:
                 try:
                     chunk = ser.read(4096)
                     if not chunk:
+                        time.sleep(0.005)
                         continue
+                    text = chunk.decode("utf-8", errors="replace")
                     socketio.emit("terminal_output",
-                                  {"data": chunk.decode("utf-8", errors="replace"), "room": room},
-                                  room=room)
+                                  {"data": text, "room": room}, room=room)
+                    # Modern View blocks
+                    if room_parser and TERMINAL_PRETTY:
+                        try:
+                            for block in _extract_blocks(text, parse_line_buf,
+                                                         room_parser, stream="VCOM"):
+                                socketio.emit("terminal_block",
+                                              {**format_block(block), "room": room},
+                                              room=room)
+                        except Exception as _pe:
+                            print(f"[PARSER] tty error: {_pe}")
+                    # Script support: feed VCOM listeners of the active board
+                    board = active_boards.get(room)
+                    if board:
+                        buf.append(text)
+                        combined = "".join(buf)
+                        for listener in list(board._vcom_listeners):
+                            try: listener(combined)
+                            except: pass
+                        if board._vcom_prompt in combined:
+                            buf.clear()
                 except Exception as e:
                     print(f"[TELNET] tty reader error: {e}")
                     break
             socketio.emit("terminal_closed", {"room": room}, room=room)
             active_telnets.pop(room, None)
+            active_boards.pop(room, None)
 
         threading.Thread(target=reader, daemon=True).start()
         emit("terminal_ready", {"room": room})
@@ -1097,19 +1176,11 @@ def admin_cmd(serial):
     tn   = active_telnets.get(room)
 
     if not tn:
-        # Try to connect on demand using terminal-info
+        # Connect on demand — same 127.0.0.1+silink (USB) / IP path as everywhere
         try:
-            data    = get_connections(serial, force=True)
-            adapter = data.get("adapter", {})
-            conns   = data.get("connections", [])
-            ports   = {c["portName"]: c["portNumber"] for c in conns}
-
-            connectivity = adapter.get("connectivityType", "usb")
-            host = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
-            port = ports.get("admin")
-
-            if not port:
-                return jsonify({"ok": False, "error": "no admin port available"}), 400
+            ep   = resolve_endpoint(serial, force=True)
+            host = ep["host"]
+            port = ep["admin_port"]
 
             tn = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
             tn.settimeout(5)
@@ -2063,12 +2134,16 @@ class Board:
         print(f"[ADM] {self.nickname or self.serial} {ts} <<< {'TIMEOUT' if timed_out else 'ok'}")
         return "".join(response)
 
-    def reset(self):
+    def reset(self, settle=1.0):
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[RST] {self.nickname or self.serial} {ts}")
-        result = self.admin("reset")
-        time.sleep(1.0)
-        return result
+        # Fire-and-forget: the WSTK admin console does not reliably echo a
+        # prompt after `target reset`, so do NOT block on admin().wait().
+        # The real "board is back" signal is the boot banner on VCOM, which a
+        # script can wait for explicitly if needed.
+        self._send_admin_raw("target reset 100")
+        time.sleep(settle)
+        return ""
 
     def flash(self, firmware_path: str, serial: str = None, ip: str = None,
               masserase: bool = True, halt_reset: bool = False) -> bool:
@@ -2332,24 +2407,14 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         emit_status("error", "Flash failed")
         return
 
-    # Get ports
+    # Get ports — unified 127.0.0.1+silink (USB) / IP path
     emit_status("connecting")
     try:
-        info    = get_connections(serial, force=True)
-        adapter = info.get("adapter", {})
-        conns   = info.get("connections", [])
-        ports   = {c["portName"]: c["portNumber"] for c in conns}
-        print(f"[RUN] ports: {ports}")
-        connectivity = adapter.get("connectivityType", "usb")
-        host = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
-        vcom_port  = ports.get("serial1")
-        admin_port = ports.get("admin")
+        ep = resolve_endpoint(serial, force=True)
+        host, vcom_port, admin_port = ep["host"], ep["vcom_port"], ep["admin_port"]
         print(f"[RUN] host={host} vcom={vcom_port} admin={admin_port}")
-        if not vcom_port or not admin_port:
-            emit_status("error", "Could not get ports from SDM")
-            return
     except Exception as e:
-        print(f"[RUN] get-info exception: {e}")
+        print(f"[RUN] endpoint exception: {e}")
         emit_status("error", f"SDM error: {e}")
         return
 
@@ -2559,21 +2624,12 @@ def scenario_run():
                               {"serial": serial, "status": "connecting"},
                               room=run_room)
                 try:
-                    info    = get_connections(serial, force=True)
-                    adapter = info.get("adapter", {})
-                    conns   = info.get("connections", [])
-                    ports   = {c["portName"]: c["portNumber"] for c in conns}
-                    connectivity = adapter.get("connectivityType", "usb")
-                    host    = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
-                    vcom_port  = ports.get("serial1")
-                    admin_port = ports.get("admin")
-                    if not vcom_port or not admin_port:
-                        raise RuntimeError("Could not get ports from SDM")
+                    ep = resolve_endpoint(serial, force=True)
                     board_obj = Board(
                         serial        = serial,
-                        host          = host,
-                        vcom_port     = vcom_port,
-                        admin_port    = admin_port,
+                        host          = ep["host"],
+                        vcom_port     = ep["vcom_port"],
+                        admin_port    = ep["admin_port"],
                         run_id        = run_id,
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),
@@ -2661,21 +2717,12 @@ def scenario_run():
                               {"serial": serial, "status": "connecting"},
                               room=run_room)
                 try:
-                    info    = get_connections(serial, force=True)
-                    adapter = info.get("adapter", {})
-                    conns   = info.get("connections", [])
-                    ports   = {c["portName"]: c["portNumber"] for c in conns}
-                    connectivity = adapter.get("connectivityType", "usb")
-                    host    = adapter.get("host", "127.0.0.1") if connectivity != "usb" else "127.0.0.1"
-                    vcom_port  = ports.get("serial1")
-                    admin_port = ports.get("admin")
-                    if not vcom_port or not admin_port:
-                        raise RuntimeError("Could not get ports from SDM")
+                    ep = resolve_endpoint(serial, force=True)
                     board_obj = Board(
                         serial        = serial,
-                        host          = host,
-                        vcom_port     = vcom_port,
-                        admin_port    = admin_port,
+                        host          = ep["host"],
+                        vcom_port     = ep["vcom_port"],
+                        admin_port    = ep["admin_port"],
                         run_id        = run_id,
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),

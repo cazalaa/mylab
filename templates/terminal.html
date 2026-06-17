@@ -644,7 +644,9 @@ async function init() {
     }
 
     if (info.error) {
-        document.getElementById("termLabel").innerText = "Error: " + info.error;
+        // Default 127.0.0.1+Silink path unavailable. Offer an EXPLICIT manual
+        // TTY fallback only when a candidate /dev/tty exists (USB only).
+        showEndpointError(info.error, info.tty_candidate);
         return;
     }
 
@@ -652,18 +654,43 @@ async function init() {
         info.serial + (info.nickname ? ` — ${info.nickname}` : "");
     document.getElementById("termLabel").innerText = info.label || "";
 
-    if (info.tty) {
-        // USB TTY — VCOM only, no ADMIN
-        document.getElementById("termHost").innerText = `TTY: ${info.tty}`;
-        document.getElementById("tabAdmin").style.display = "none";
-        createTerminalTTY("vcom", "paneVcom", info.tty);
+    // Single unified path for USB (host=127.0.0.1) and IP: TCP, VCOM + ADMIN
+    document.getElementById("termHost").innerText =
+        `${info.host}  VCOM:${info.vcom}  ADMIN:${info.admin}`;
+    createTerminal("vcom",  "paneVcom",  info.host, info.vcom);
+    createTerminal("admin", "paneAdmin", info.host, info.admin);
+    applyView();
+}
+
+// Endpoint resolution failed (no Silink ports). Never auto-connect TTY:
+// show the reason and, for USB, a button the user can press deliberately.
+function showEndpointError(msg, ttyCandidate) {
+    document.getElementById("termLabel").innerText = "Connexion indisponible";
+    document.getElementById("termHost").innerText = msg;
+    let html =
+        '<div style="padding:18px;color:#f4f3f0;font:13px/1.6 monospace">' +
+        '<div style="color:#e0654f;margin-bottom:12px">⚠ ' + msg + '</div>';
+    if (ttyCandidate) {
+        html +=
+            '<div style="margin-bottom:10px;opacity:.85">Repli série brute possible ' +
+            '(VCOM uniquement, pas d\'ADMIN) :</div>' +
+            '<button onclick="connectTTYFallback(\'' + ttyCandidate + '\')" ' +
+            'style="padding:7px 16px;border:0;border-radius:6px;background:#1D9E75;' +
+            'color:#fff;cursor:pointer;font:13px monospace">' +
+            'Connecter en TTY : ' + ttyCandidate + '</button>';
     } else {
-        // Network (ethernet/IP)
-        document.getElementById("termHost").innerText =
-            `${info.host}  VCOM:${info.vcom}  ADMIN:${info.admin}`;
-        createTerminal("vcom",  "paneVcom",  info.host, info.vcom);
-        createTerminal("admin", "paneAdmin", info.host, info.admin);
+        html += '<div style="opacity:.7">Aucun repli TTY pour cette carte.</div>';
     }
+    html += '</div>';
+    document.getElementById("paneVcom").innerHTML = html;
+}
+
+// Triggered ONLY by the user clicking the fallback button above.
+function connectTTYFallback(tty) {
+    document.getElementById("paneVcom").innerHTML = "";
+    document.getElementById("termHost").innerText = `TTY (secours) : ${tty}`;
+    document.getElementById("tabAdmin").style.display = "none";
+    createTerminalTTY("vcom", "paneVcom", tty);
     applyView();
 }
 
