@@ -2031,6 +2031,71 @@ class Board:
         self._vcom_sock.settimeout(None)
         return data.decode("utf-8", errors="replace")
 
+    def read(self, lines=1, timeout=5.0, pattern=None, include_partial=False):
+        """
+        Lit des lignes spontanees sur VCOM, SANS envoyer de commande.
+        Typiquement apres board.button(...) pour capter un EVENT.
+
+        lines           : nombre de lignes completes a attendre (defaut 1).
+        timeout         : delai max en secondes.
+        pattern         : optionnel ; regex/sous-chaine. Rend la main des
+                          qu'une ligne matche (lines est alors ignore).
+        include_partial : si True, prend aussi en compte la derniere ligne
+                          non terminee par un saut de ligne (utile pour un
+                          prompt ou un message tronque avant le timeout).
+        Retour          : liste des lignes captees (vide si rien avant timeout).
+
+        Meme chemin reader/parser que cli() : marche a l'identique en USB
+        et en IP, et l'EVENT reste visible dans le terminal.
+        """
+        if not self._vcom_sock:
+            return []
+        rx = re.compile(pattern) if pattern else None
+        event = threading.Event()
+        committed = []                      # lignes des buffers deja flushes
+        st = {"prev_len": 0, "last": []}
+
+        def _done():
+            ls = committed + st["last"]
+            if rx:
+                return any(rx.search(x) for x in ls)
+            return len(ls) >= lines
+
+        def on_data(combined):
+            # buffer vide (prompt -> flush) : on fige ce qu'on avait
+            if len(combined) < st["prev_len"]:
+                committed.extend(st["last"])
+                st["last"] = []
+            st["prev_len"] = len(combined)
+            cur = [x.rstrip("\r") for x in combined.splitlines()]
+            # par defaut on ne garde que les lignes terminees par un saut
+            # de ligne ; avec include_partial on garde aussi la derniere
+            if include_partial or combined.endswith(("\n", "\r")):
+                st["last"] = cur
+            else:
+                st["last"] = cur[:-1]
+            if _done():
+                event.set()
+
+        self._vcom_listeners.append(on_data)
+        try:
+            event.wait(timeout=timeout)
+        finally:
+            try:
+                self._vcom_listeners.remove(on_data)
+            except ValueError:
+                pass
+
+        out = committed + st["last"]
+        if rx:
+            res = []
+            for x in out:
+                res.append(x)
+                if rx.search(x):
+                    break
+            return res
+        return out[:lines] if lines else out
+
     def cli(self, cmd, timeout=10.0):
         if not self._vcom_sock:
             return ""
