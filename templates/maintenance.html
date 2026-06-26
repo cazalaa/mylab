@@ -1,8 +1,7 @@
 <!-- ── maintenance page fragment ── -->
 
-<!-- barre groupe avec SDM à gauche, groupes à droite -->
-<div class="test-source-bar" style="justify-content:space-between; align-items:center; margin-bottom:14px;">
-    <button id="btnSdm" onclick="launchSdm()" style="justify-content:center;">SDM</button>
+<!-- barre groupes (alignée à droite) -->
+<div class="test-source-bar" style="justify-content:flex-end; align-items:center; margin-bottom:14px;">
     <div style="display:flex; gap:12px;">
         <button id="saveGroupBtn"   onclick="toggleGroupPanel('save','saveGroupBtn')">Save Group</button>
         <button id="loadGroupBtn"   onclick="toggleGroupPanel('load','loadGroupBtn')">Load Group</button>
@@ -448,19 +447,4 @@ document.addEventListener("click", e => {
     closeGroupPanel();
 });
 
-async function launchSdm() {
-    const btn = document.getElementById("btnSdm");
-    const icon = btn.innerText;
-    btn.innerText = "…";
-    btn.disabled = true;
-    const res  = await fetch("/sdm/ui", { method: "POST" });
-    const data = await res.json();
-    btn.innerText = data.ok ? "✓" : "✕";
-    btn.classList.add(data.ok ? "success" : "error");
-    setTimeout(() => {
-        btn.classList.remove("success", "error");
-        btn.innerText = icon;
-        btn.disabled = false;
-    }, 3000);
-}
 </script>

@@ -527,7 +527,7 @@ body {
     <div class="term-tab active" id="tabVcom"  onclick="switchTab('vcom')">
         <span class="term-tab-status connecting" id="statusVcom"></span>VCOM
     </div>
-    <div class="term-tab" id="tabAdmin" onclick="switchTab('admin')">
+    <div class="term-tab" id="tabAdmin" onclick="switchTab('admin')" style="display:none">
         <span class="term-tab-status connecting" id="statusAdmin"></span>ADMIN
     </div>
 
@@ -554,6 +554,7 @@ body {
         <button class="term-action-btn" onclick="termPb(0)">PB0</button>
         <div class="term-action-sep"></div>
     </span>
+    <button class="term-action-btn" id="termResetBtn" onclick="resetMcu()">⟲ Reset MCU</button>
     <button class="term-action-btn" onclick="pickScript()">📁 Script</button>
     <span class="term-script-name" id="termScriptName">no script selected</span>
     <button class="term-action-btn term-run-btn" id="termRunBtn" onclick="runScript()" disabled>▶ Run</button>
@@ -644,8 +645,8 @@ async function init() {
     }
 
     if (info.error) {
-        // Default 127.0.0.1+Silink path unavailable. Offer an EXPLICIT manual
-        // TTY fallback only when a candidate /dev/tty exists (USB only).
+        // No VCOM port AND no usable TTY — show the reason (+ manual button
+        // if a candidate exists).
         showEndpointError(info.error, info.tty_candidate);
         return;
     }
@@ -654,11 +655,21 @@ async function init() {
         info.serial + (info.nickname ? ` — ${info.nickname}` : "");
     document.getElementById("termLabel").innerText = info.label || "";
 
-    // Single unified path for USB (host=127.0.0.1) and IP: TCP, VCOM + ADMIN
-    document.getElementById("termHost").innerText =
-        `${info.host}  VCOM:${info.vcom}  ADMIN:${info.admin}`;
-    createTerminal("vcom",  "paneVcom",  info.host, info.vcom);
-    createTerminal("admin", "paneAdmin", info.host, info.admin);
+    // VCOM only — ADMIN is intentionally not displayed.
+    // Transport is chosen by what terminal-info returned:
+    //   - vcom port present  -> TCP socket (USB 127.0.0.1 / IP)
+    //   - else tty present   -> raw serial /dev/tty (USB fallback)
+    if (info.vcom != null) {
+        document.getElementById("termHost").innerText =
+            `${info.host}  VCOM:${info.vcom}`;
+        createTerminal("vcom", "paneVcom", info.host, info.vcom);
+    } else if (info.tty) {
+        document.getElementById("termHost").innerText = `VCOM (TTY): ${info.tty}`;
+        createTerminalTTY("vcom", "paneVcom", info.tty);
+    } else {
+        showEndpointError("Aucun port VCOM ni TTY disponible.", null);
+        return;
+    }
     applyView();
 }
 
@@ -886,6 +897,28 @@ async function termPb(pb) {
     await termCmd(`target button release ${pb}`);
 
     btns.forEach(b => b.disabled = false);
+}
+
+// MCU reset via Commander (pycommander) — independent of the admin console,
+// so it works on USB adapters that have no admin CLI.
+async function resetMcu() {
+    const btn = document.getElementById("termResetBtn");
+    const vt  = terminals["vcom"]?.term;
+    if (btn) { btn.disabled = true; btn.textContent = "⟲ Reset…"; }
+    vt?.writeln("\x1b[38;5;244m[reset MCU via commander]\x1b[0m");
+    try {
+        const r = await fetch(`/api/adapter/${serial}/reset-mcu`, { method: "POST" });
+        const j = await r.json();
+        if (j.ok) {
+            vt?.writeln("\x1b[38;5;71m[reset OK]\x1b[0m");
+        } else {
+            vt?.writeln(`\x1b[38;5;167m[reset failed] ${j.msg || j.error || ""}\x1b[0m`);
+        }
+    } catch (e) {
+        vt?.writeln(`\x1b[38;5;167m[reset error] ${e}\x1b[0m`);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "⟲ Reset MCU"; }
+    }
 }
 // ── script picker & runner ─────────────────────────
 let selectedScriptPath = null;
