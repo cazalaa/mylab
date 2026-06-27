@@ -3,7 +3,7 @@ from random import randint
 
 def script(board):
     board.config_vcom(line_ending="CRLF", echo=True, prompt=">")
-    board.reset()
+
     # --- IEEE 802.15.4 2.4 GHz Init ---
     board.print("--- init 2.4GHz 902.15.4 ---" )
     board.cli("rx 0")

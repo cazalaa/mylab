@@ -161,12 +161,6 @@ function renderTestCards(adapters) {
                     <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onCli(this)">Cli</button>
                     <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onReset(this)">Reset</button>
                 </div>
-                <div class="test-btn-row">
-                    <button class="test-btn-half ${isTTY ? 'test-btn-hidden' : ''}"
-                            data-serial="${a.serialNumber}" data-pb="1" onclick="onPb(this)">Pb1</button>
-                    <button class="test-btn-half ${isTTY ? 'test-btn-hidden' : ''}"
-                            data-serial="${a.serialNumber}" data-pb="0" onclick="onPb(this)">Pb0</button>
-                </div>
             </div>`;
         container.appendChild(card);
     });
@@ -295,32 +289,24 @@ async function onReset(btn) {
     const label  = btn.innerText;
     btn.innerText = "…";
     btn.disabled  = true;
-    await sendAdminCommand(serial, "target reset 100");
-    btn.innerText = "✓";
-    btn.classList.add("success");
+    let ok = false;
+    try {
+        const r = await fetch(`/api/adapter/${serial}/reset-mcu`, { method: "POST" });
+        ok = (await r.json()).ok;
+    } catch (e) {
+        ok = false;
+    }
+    btn.innerText = ok ? "✓" : "✕";
+    btn.classList.add(ok ? "success" : "error");
     setTimeout(() => {
-        btn.classList.remove("success");
+        btn.classList.remove("success", "error");
         btn.innerText = label;
         btn.disabled  = false;
     }, 2000);
 }
 
 async function onPb(btn) {
-    const serial = btn.dataset.serial;
-    const pb     = btn.dataset.pb;
-    const label  = btn.innerText;
-    btn.innerText = "…";
-    btn.disabled  = true;
-    await sendAdminCommand(serial, `target button press ${pb}`);
-    await new Promise(r => setTimeout(r, 100));
-    await sendAdminCommand(serial, `target button release ${pb}`);
-    btn.innerText = "✓";
-    btn.classList.add("success");
-    setTimeout(() => {
-        btn.classList.remove("success");
-        btn.innerText = label;
-        btn.disabled  = false;
-    }, 2000);
+    // PB0/PB1 removed for now.
 }
 
 document.addEventListener("click", e => {

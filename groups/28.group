@@ -1,0 +1,11 @@
+{
+  "name": "28",
+  "adapters": [
+    {
+      "serialNumber": "440330454",
+      "connectivityType": "usb",
+      "boardId": "BRD2705A",
+      "boardLabel": "BRD2705A Rev A02"
+    }
+  ]
+}

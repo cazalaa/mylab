@@ -1,6 +1,5 @@
 import subprocess
 import time
-import requests
 import configparser
 import os
 import sys
@@ -39,18 +38,14 @@ WIN_EXPANDED   = 700   # hauteur dépliée
 _SILABS_ROOT    = Path.home() / ".silabs"
 _IS_WINDOWS     = sys.platform == "win32"
 _IS_MAC         = sys.platform == "darwin"
-_SDM_NAME       = "sdm.exe"       if _IS_WINDOWS else "sdm"
 _COMMANDER_NAME = "commander.exe" if _IS_WINDOWS else "commander"
 
 # Chemins fallback par plateforme (utilisés uniquement si auto-détection échoue)
 if _IS_WINDOWS:
-    _DEFAULT_SDM       = str(Path.home() / "AppData/Local/silabs/slt/installs/archive/sdm-win32-x64/sdm.exe")
     _DEFAULT_COMMANDER = str(Path.home() / "AppData/Local/silabs/Commander/commander.exe")
 elif _IS_MAC:
-    _DEFAULT_SDM       = str(Path.home() / ".silabs/slt/installs/archive/sdm-darwin-arm64/sdm")
     _DEFAULT_COMMANDER = str(Path.home() / ".silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander")
 else:  # Linux
-    _DEFAULT_SDM       = str(Path.home() / ".silabs/slt/installs/archive/sdm-linux-x64/sdm")
     _DEFAULT_COMMANDER = str(Path.home() / ".silabs/slt/installs/archive/commander-linux-x64/commander")
 
 def _is_exec(p: str) -> bool:
@@ -70,19 +65,6 @@ def _find_in_silabs(name: str) -> str | None:
             print(f"[INFO] {name} trouvé via ~/.silabs : {candidate}")
             return str(candidate)
     return None
-
-def resolve_sdm(path: str | None) -> str | None:
-    if path and _is_exec(path):
-        return path
-    envp = os.environ.get("SDM_BIN")
-    if envp and _is_exec(envp):
-        return envp
-    if _is_exec(_DEFAULT_SDM):
-        return _DEFAULT_SDM
-    p = shutil.which("sdm")
-    if p and _is_exec(p):
-        return p
-    return _find_in_silabs(_SDM_NAME)
 
 def resolve_commander(path: str | None) -> str | None:
     if path and _is_exec(path):
@@ -106,14 +88,10 @@ ALLOWED_PAGES = {"maintenance", "manual_control", "script_control"}
 config = configparser.ConfigParser()
 config.read(CONFIG_FILE)
 
-SDM_PATH = resolve_sdm(config["paths"].get("sdm"))
 COMMANDER_PATH = resolve_commander(config["paths"].get("commander"))
 
 # On ne sauvegarde que si un chemin était absent du config et vient d'être auto-détecté
 _save_needed = False
-if SDM_PATH and not config["paths"].get("sdm"):
-    config["paths"]["sdm"] = SDM_PATH
-    _save_needed = True
 if COMMANDER_PATH and not config["paths"].get("commander"):
     config["paths"]["commander"] = COMMANDER_PATH
     _save_needed = True
@@ -132,63 +110,36 @@ from parsers import get_parser, format_block
 TERMINAL_PARSER  = config["server"].get("parser",           "auto").strip().lower()
 TERMINAL_PRETTY  = config["server"].get("terminal_pretty",  "true").strip().lower() == "true"
 
-SDM_BASE = f"http://{HOST}:{PORT}"
-
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 
 # ----------------------------
-# SDM
+# ADAPTER ENUMERATION  (pycommander only — SDM/Silink fully removed)
 # ----------------------------
-def is_sdm_running():
-    try:
-        return requests.post(f"{SDM_BASE}/api/adapter/clear-and-scan", timeout=2).status_code == 200
-    except requests.RequestException:
-        return False
+_probe_cache: dict[str, dict] = {}   # serial -> kit_info (adapter probe result)
 
-def start_sdm():
-    subprocess.Popen([SDM_PATH, "server", "start"])
-
-def stop_sdm():
-    try:
-        subprocess.run([SDM_PATH, "server", "stop"], timeout=5)
-        time.sleep(1)
-    except Exception as e:
-        print(f"[INFO] stop_sdm: {e}")
-
-def restart_sdm():
-    """Stop then start SDM to kill any lingering Silink instances."""
-    print("[INFO] Restarting SDM to clean up Silink instances...")
-    invalidate_connections()
-    if is_sdm_running():
-        stop_sdm()
-    start_sdm()
-    for _ in range(10):
-        time.sleep(1)
-        if is_sdm_running():
-            print("[INFO] SDM ready.")
-            return
-    print("[WARN] SDM did not start in time.")
+def invalidate_connections(serial=None):
+    """Drop cached adapter probe info (after scan / flash / recover / erase)."""
+    if serial is None:
+        _probe_cache.clear()
+    else:
+        _probe_cache.pop(str(serial), None)
 
 def clear_and_scan():
+    """Re-enumerate adapters. pycommander has no scan server to poke; just drop
+    cached probe data so the next listing is fresh."""
     invalidate_connections()
-    requests.post(f"{SDM_BASE}/api/adapter/clear-and-scan")
 
 def get_adapters():
-    try:
-        return requests.get(f"{SDM_BASE}/api/adapters").json()
-    except requests.RequestException as e:
-        print(f"[WARN] get_adapters failed: {e}")
-        return []
+    """USB + network adapters via pycommander (see pyc_list_adapters)."""
+    return pyc_list_adapters()
 
-def extract_board_label(a):
-    boards = a.get("boards") or []
-    return boards[0].get("label", "") if boards else ""
-
-def extract_board(a):
-    boards = a.get("boards") or []
-    return boards[0].get("id", "Unknown") if boards else "Unknown"
+def _kit_cached(serial):
+    serial = str(serial)
+    if serial not in _probe_cache:
+        _probe_cache[serial] = pyc_kit_info(serial=serial)
+    return _probe_cache[serial]
 
 # ----------------------------
 # COMMANDER ACTIONS
@@ -206,14 +157,55 @@ def run_commander(cmd, serial):
         invalidate_connections(serial)
         return {"serialNumber": serial, "ok": False, "error": str(e)}
 
-@app.route("/sdm/ui", methods=["POST"])
-def sdm_ui():
+
+def _conn_flag(serial):
+    """Commander connection flag for a serial, from pycommander enumeration:
+    --serialno (USB) or --ip <addr> (IP). Returns (flag_list, "usb"|"ip")."""
+    a  = {x["serial"]: x for x in pyc_list_adapters()}.get(str(serial))
+    ip = (a or {}).get("ip")
+    if ip:
+        return ["--ip", ip], "ip"
+    return ["--serialno", str(serial)], "usb"
+
+
+def _adapters_compat():
+    """pycommander adapters in the legacy {serialNumber, host, nickname, boards}
+    shape consumed by the scenario validator/resolver. There is no board
+    database without SDM, so `boards` is always empty."""
+    return [{
+        "serialNumber": a["serial"],
+        "host":         a.get("ip"),
+        "nickname":     a.get("nickname", ""),
+        "boards":       [],
+    } for a in pyc_list_adapters()]
+
+
+def reset_mcu(serial):
+    """Reset the target MCU via pycommander `device reset` (Commander-CLI
+    fallback). Independent of any admin console — works on USB and IP.
+    Returns (ok: bool, msg: str). Single source of truth for MCU reset, used by
+    both the Reset button route and Board.reset()."""
+    flag, _ = _conn_flag(serial)              # ["--serialno", s] or ["--ip", ip]
+    ip = flag[1] if flag[0] == "--ip" else None
+    if _PYC_OK:
+        try:
+            res = _pyc(serial=None if ip else serial, ip=ip).device.reset()
+            ok  = bool(res.get("success")) if isinstance(res, dict) else bool(res)
+            print(f"[RST-MCU] {serial} via pycommander: {'ok' if ok else res}")
+            return ok, ("" if ok else str(res))
+        except Exception as e:
+            print(f"[RST-MCU] {serial} pycommander error ({e}); CLI fallback")
     try:
-        subprocess.Popen([SDM_PATH, "ui", "start"])
-        return jsonify({"ok": True})
+        r = subprocess.run([COMMANDER_PATH, "device", "reset"] + flag,
+                           capture_output=True, text=True, timeout=30)
+        ok  = r.returncode == 0
+        msg = (r.stdout if ok else r.stderr).strip()
+        print(f"[RST-MCU] {serial} via CLI: {'ok' if ok else msg}")
+        return ok, msg
     except Exception as e:
-        print(f"[ERROR] sdm ui start: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        print(f"[RST-MCU] {serial} error: {e}")
+        return False, str(e)
+
 
 @app.route("/mass_erase", methods=["POST"])
 def mass_erase():
@@ -270,176 +262,22 @@ def fw_upgrade():
 # UI
 # ----------------------------
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper: ensure Silink is started for USB adapters and return connections
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper: ensure Silink is started for USB adapters and return connections.
-# list-connections is called AT MOST ONCE per serial per app session — further
-# calls use get-info so no extra Silink instances are spawned.
-# ─────────────────────────────────────────────────────────────────────────────
-
 # -----------------------------------------------------------------------------
-# USB / SDM / Silink connection handling
+# Adapter identity helpers (SDM/Silink fully removed)
 # -----------------------------------------------------------------------------
-# Important distinction:
 #   - adapter identity: USB uses serialNumber, IP adapters use their real IP
-#   - socket endpoint: USB uses 127.0.0.1 plus dynamic Silink ports
 # Never store/use 127.0.0.1 as the identity of a USB adapter.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
-_connection_cache: dict[str, dict] = {}
-_connection_locks: dict[str, threading.Lock] = {}
-_connection_locks_guard = threading.Lock()
 
 
 def _is_loopback_host(host: str | None) -> bool:
     return str(host or "").strip().lower() in _LOOPBACK_HOSTS
 
 
-def invalidate_connections(serial_number: str | None = None) -> None:
-    """Drop cached SDM/Silink connection info.
-
-    Call this after scan/flash/recover/erase/SDM restart, because USB Silink
-    localhost ports can change when the Silink process is recreated.
-    """
-    with _connection_locks_guard:
-        if serial_number:
-            _connection_cache.pop(str(serial_number), None)
-        else:
-            _connection_cache.clear()
-
-
-def _connection_lock(serial_number: str) -> threading.Lock:
-    serial_number = str(serial_number)
-    with _connection_locks_guard:
-        return _connection_locks.setdefault(serial_number, threading.Lock())
-
-
-def _ports_from(data: dict) -> dict:
-    conns = data.get("connections", []) if isinstance(data, dict) else []
-    return {c.get("portName"): c.get("portNumber") for c in conns if isinstance(c, dict)}
-
-
-def _normalize_connections(data, serial_number: str) -> dict:
-    """Normalize SDM responses.
-
-    Some SDM versions return a bare list from list-connections; most return
-    {adapter, connections}. This function always returns the dict shape.
-    """
-    if isinstance(data, list):
-        try:
-            info = requests.get(
-                f"{SDM_BASE}/api/adapter/{serial_number}/get-info",
-                timeout=5,
-            ).json()
-            return {"adapter": info.get("adapter", {}), "connections": data}
-        except Exception:
-            return {"adapter": {}, "connections": data}
-    if isinstance(data, dict):
-        return data
-    return {"adapter": {}, "connections": []}
-
-
-def _sdm_get_info(serial_number: str) -> dict:
-    r = requests.get(f"{SDM_BASE}/api/adapter/{serial_number}/get-info", timeout=5)
-    r.raise_for_status()
-    return _normalize_connections(r.json(), serial_number)
-
-
-def _sdm_list_connections(serial_number: str, timeout: int = 8) -> dict:
-    r = requests.get(
-        f"{SDM_BASE}/api/adapter/{serial_number}/list-connections",
-        timeout=timeout,
-    )
-    r.raise_for_status()
-    return _normalize_connections(r.json(), serial_number)
-
-
-def get_connections(serial_number: str, timeout: int = 8,
-                    force: bool = False, start: bool = True) -> dict:
-    """Return SDM connection info for one adapter.
-
-    start=True  : ensure Silink is started for USB boards if ports are missing.
-    start=False : only inspect current SDM state; do not spawn Silink just to
-                  render adapter cards.
-    force=True  : ignore cached data and ask SDM/list-connections again.
-    """
-    serial_number = str(serial_number)
-    with _connection_lock(serial_number):
-        if not force:
-            try:
-                info = _sdm_get_info(serial_number)
-                ports = _ports_from(info)
-                if ports.get("serial1") or ports.get("admin") or not start:
-                    _connection_cache[serial_number] = info
-                    return info
-            except Exception as e:
-                print(f"[WARN] get-info {serial_number}: {e}")
-
-            cached = _connection_cache.get(serial_number)
-            if cached:
-                ports = _ports_from(cached)
-                if ports.get("serial1") or ports.get("admin") or not start:
-                    return cached
-
-        if not start:
-            return _connection_cache.get(serial_number, {"adapter": {}, "connections": []})
-
-        data = _sdm_list_connections(serial_number, timeout=timeout)
-        _connection_cache[serial_number] = data
-        print(f"[INFO] list-connections {serial_number}: { _ports_from(data) }")
-        return data
-
-
-# -----------------------------------------------------------------------------
-# Unique source of truth for "where do we connect for this board?"
-# -----------------------------------------------------------------------------
-# USB and IP differ in exactly ONE thing: the host.
-#   - USB : host is ALWAYS 127.0.0.1, ports come from Silink (serial1 / admin)
-#   - IP  : host is the board's real address, ports come from SDM
-# Everything downstream (sockets, reader, parser, listeners, scripts) is then
-# identical. No code path should ever re-derive host/ports by hand again.
-# -----------------------------------------------------------------------------
 class EndpointError(RuntimeError):
-    """Raised when SDM/Silink cannot give us both serial1 and admin ports."""
+    """Raised when no usable VCOM endpoint can be resolved for a board."""
     pass
 
-
-def resolve_endpoint(serial_number, *, force=False, start=True):
-    """Return a normalized endpoint, identical shape for USB and IP:
-
-        {
-          "serial": str,
-          "connectivity": "usb" | "ethernet" | ...,
-          "host": str,            # USB -> "127.0.0.1" ; IP -> real host
-          "vcom_port": int,       # Silink serial1 (USB) / board VCOM (IP)
-          "admin_port": int,      # Silink admin
-          "adapter": dict,        # raw SDM adapter record
-        }
-
-    Raises EndpointError if either port is missing, instead of silently
-    degrading USB to a raw /dev/tty connection. The TTY fallback is offered
-    explicitly elsewhere (manual, never automatic).
-    """
-    info    = get_connections(serial_number, force=force, start=start)
-    adapter = info.get("adapter", {}) if isinstance(info, dict) else {}
-    ports   = _ports_from(info)
-    is_usb  = adapter.get("connectivityType", "usb") == "usb"
-
-    ep = {
-        "serial":       str(serial_number),
-        "connectivity": adapter.get("connectivityType", "usb"),
-        "host":         "127.0.0.1" if is_usb else adapter.get("host", ""),
-        "vcom_port":    ports.get("serial1"),
-        "admin_port":   ports.get("admin"),
-        "adapter":      adapter,
-    }
-    if not ep["vcom_port"] or not ep["admin_port"]:
-        raise EndpointError(
-            f"Silink/SDM n'a pas fourni serial1+admin pour {serial_number} "
-            f"(serial1={ep['vcom_port']} admin={ep['admin_port']}). "
-            f"Re-scanner, redémarrer SDM ou rebrancher la carte."
-        )
-    return ep
 
 
 def _find_usb_tty(serial_number):
@@ -628,41 +466,22 @@ def scan():
 
 @app.route("/adapters")
 def adapters():
-    data = get_adapters()
-    if isinstance(data, dict):
-        data = data.get("adapters") or []
-
     result = []
-    for a in data:
-        serial = a.get("serialNumber")
+    for a in pyc_list_adapters():          # USB + network, via pycommander
+        serial = a.get("serial")
         if not serial:
             continue
-
-        # Do not start Silink just to render adapter cards. USB boards are still
-        # controlled through Silink later, when a terminal/admin command/run needs it.
-        tty_mode = False
-        try:
-            info    = get_connections(serial, timeout=3, start=False)
-            conns   = info.get("connections", [])
-            ports   = {c.get("portName"): c.get("portNumber") for c in conns}
-            if a.get("connectivityType") != "usb":
-                tty_mode = not ports.get("serial1")
-            print(f"[INFO] get-info {ports}")
-        except Exception as e:
-            print(f"[WARN] get-info {serial}: {e}")
-            tty_mode = False  # safe fallback: keep manual-control buttons visible
-
+        kit = _kit_cached(serial)          # `adapter probe` (cached)
         result.append({
             "serialNumber":     serial,
-            "boardId":          extract_board(a),
-            "boardLabel":       extract_board_label(a),
-            "connectivityType": a.get("connectivityType"),
-            "host":             a.get("host"),
-            "label":            a.get("label", ""),
+            "boardId":          kit.get("kit_part_number", "") or "Unknown",
+            "boardLabel":       kit.get("kit_name", "") or "",
+            "connectivityType": a.get("connectivity", "usb"),
+            "host":             a.get("ip"),
+            "label":            kit.get("kit_name", "") or "",
             "nickname":         a.get("nickname", ""),
-            "ttyMode":          tty_mode,
+            "ttyMode":          False,
         })
-
     return jsonify(result)
 
 # ── terminal window API ────────────────────────────
@@ -764,47 +583,30 @@ def terminal_run_script():
             with open(script_path) as f:
                 code = f.read()
 
-            # Reuse existing telnet sockets from the terminal window
-            vcom_sock  = active_telnets.get(f"{serial}_vcom")
-            admin_sock = active_telnets.get(f"{serial}_admin")
-
-            if not vcom_sock or not admin_sock:
-                # Sockets not yet open — connect fresh (same path for USB & IP)
-                try:
-                    ep = resolve_endpoint(serial, force=True)
-                except EndpointError as e:
-                    emit_out(f"✗ {e}", "red")
-                    return
-                board_obj = Board(
-                    serial       = serial,
-                    host         = ep["host"],
-                    vcom_port    = ep["vcom_port"],
-                    admin_port   = ep["admin_port"],
-                    run_id       = None,
-                    scenario_dir = "",
-                )
+            # connect() reuses the terminal's open channel if present, else opens
+            # fresh via pycommander (USB tty / IP TCP). Single source of truth.
+            board_obj = Board(serial=serial, host="", vcom_port=0, admin_port=0,
+                              run_id=None, scenario_dir="")
+            try:
                 board_obj.connect()
-            else:
-                # Inject existing sockets — no new connections needed
-                board_obj = Board(
-                    serial       = serial,
-                    host         = "127.0.0.1",  # not used when sockets provided
-                    vcom_port    = 0,
-                    admin_port   = 0,
-                    run_id       = None,
-                    scenario_dir = "",
-                )
-                board_obj._vcom_sock  = vcom_sock
-                board_obj._admin_sock = admin_sock
+            except EndpointError as e:
+                emit_out(f"✗ {e}", "red")
+                return
 
-            # Register so _start_reader dispatches to this board
+            # Ensure the channel reader dispatches RX to this board
             active_boards[f"{serial}_vcom"]  = board_obj
             active_boards[f"{serial}_admin"] = board_obj
+
+            # Don't send anything until the VCOM connection is open & settled
+            if not board_obj.wait_vcom_ready():
+                emit_out("✗ VCOM connection not ready (serial port not open)", "red")
+                return
 
             namespace = {"board": board_obj, "time": time, "__builtins__": __builtins__}
             exec(code, namespace)
             if "script" in namespace and callable(namespace["script"]):
                 namespace["script"](board_obj)
+            board_obj.sync()   # let the last command's output + prompt arrive first
             emit_out("Script completed", "green")
         except Exception as e:
             import traceback
@@ -818,94 +620,223 @@ def terminal_run_script():
 
 @app.route("/api/terminal-info/<serial_number>")
 def terminal_info(serial_number):
-    # ── Primary path: pycommander enumeration (USB tty / IP TCP:4901) ──
-    if _PYC_OK:
-        try:
-            v = resolve_vcom(serial_number)
-            if v.kind == "tcp":
-                print(f"[INFO] terminal-info {serial_number}: IP host={v.host} vcom={v.port}")
-                return jsonify({
-                    "serial":          serial_number,
-                    "host":            v.host,
-                    "vcom":            v.port,
-                    "admin":           None,
-                    "tty":             None,
-                    "connectivity":    "ip",
-                    "admin_available": False,
-                    "label":           v.label or serial_number,
-                    "nickname":        v.nickname,
-                })
-            else:  # serial / USB tty
-                print(f"[INFO] terminal-info {serial_number}: USB tty={v.tty}")
-                return jsonify({
-                    "serial":          serial_number,
-                    "host":            "127.0.0.1",
-                    "vcom":            None,
-                    "admin":           None,
-                    "tty":             v.tty,
-                    "connectivity":    "usb",
-                    "admin_available": False,
-                    "label":           v.label or serial_number,
-                    "nickname":        v.nickname,
-                })
-        except EndpointError as e:
-            print(f"[INFO] terminal-info {serial_number}: pycommander -> {e}")
-            return jsonify({"error": str(e), "tty_candidate": None,
-                            "serial": serial_number}), 503
-        except Exception as e:
-            print(f"[WARN] terminal-info {serial_number}: pycommander error ({e}); "
-                  f"falling back to SDM")
-
-    # ── Transitional fallback: legacy SDM/Silink resolver ──
-    # (kept only until pycommander is validated on hardware; safe to delete then)
+    """Resolve the VCOM endpoint from pycommander (USB tty / IP TCP:4901)."""
+    if not _PYC_OK:
+        return jsonify({"error": "pycommander unavailable", "serial": serial_number}), 500
     try:
-        ep = resolve_endpoint(serial_number, force=True)
+        v = resolve_vcom(serial_number)
     except EndpointError as e:
-        # No Silink VCOM port. For USB, fall back to the raw /dev/tty so the
-        # terminal still works (VCOM only). IP boards have no tty -> error.
-        tty_candidate = _find_usb_tty(serial_number)
-        if tty_candidate:
-            print(f"[INFO] terminal-info {serial_number}: no silink ports, "
-                  f"using tty={tty_candidate}")
-            return jsonify({
-                "serial":          serial_number,
-                "host":            "127.0.0.1",
-                "vcom":            None,
-                "admin":           None,
-                "tty":             tty_candidate,
-                "connectivity":    "usb",
-                "admin_available": False,
-                "label":           serial_number,
-                "nickname":        "",
-            })
-        print(f"[INFO] terminal-info {serial_number}: no silink ports, no tty")
-        return jsonify({
-            "error":         str(e),
-            "tty_candidate": None,
-            "serial":        serial_number,
-        }), 503
+        print(f"[INFO] terminal-info {serial_number}: {e}")
+        return jsonify({"error": str(e), "tty_candidate": None,
+                        "serial": serial_number}), 503
     except Exception as e:
         print(f"[ERROR] terminal-info {serial_number}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "serial": serial_number}), 500
 
-    adapter = ep["adapter"]
-    print(f"[INFO] terminal-info {serial_number}: "
-          f"host={ep['host']} vcom={ep['vcom_port']} admin={ep['admin_port']}")
+    if v.kind == "tcp":
+        print(f"[INFO] terminal-info {serial_number}: IP host={v.host} vcom={v.port}")
+        return jsonify({
+            "serial":          serial_number,
+            "host":            v.host,
+            "vcom":            v.port,
+            "admin":           None,
+            "tty":             None,
+            "connectivity":    "ip",
+            "admin_available": False,
+            "label":           v.label or serial_number,
+            "nickname":        v.nickname,
+        })
+    print(f"[INFO] terminal-info {serial_number}: USB tty={v.tty}")
     return jsonify({
         "serial":          serial_number,
-        "host":            ep["host"],
-        "vcom":            ep["vcom_port"],
-        "admin":           ep["admin_port"],
-        "connectivity":    ep["connectivity"],
-        "admin_available": bool(ep["admin_port"]),
-        "label":           adapter.get("label", serial_number),
-        "nickname":        adapter.get("nickname", ""),
+        "host":            "127.0.0.1",
+        "vcom":            None,
+        "admin":           None,
+        "tty":             v.tty,
+        "connectivity":    "usb",
+        "admin_available": False,
+        "label":           v.label or serial_number,
+        "nickname":        v.nickname,
     })
 
 # ── WebSocket telnet bridge ────────────────────────
-active_telnets = {}   # room_id -> socket
+active_telnets = {}   # room_id -> transport (serial.Serial OR socket) — the ONE handle
 active_boards  = {}   # room_id -> current Board instance (updated each run)
+# Serializes the "is it already open? -> open it" critical section across the
+# terminal handlers (connect_tty/connect_telnet) and Board.connect(), so a USB
+# CDC tty is never opened twice (which silently breaks comms on macOS).
+_open_lock     = threading.Lock()
+_channel_open  = {}   # room_id -> True  (EXPLICIT open flag, single source of truth)
 _room_parsers  = {}   # room_id -> BaseParser (for interactive terminal pretty display)
+
+
+# -----------------------------------------------------------------------------
+# Channel manager — a VCOM/ADMIN channel is opened EXACTLY ONCE per room.
+# -----------------------------------------------------------------------------
+# `active_telnets[room]` holds the single transport; `_channel_open[room]` is the
+# explicit flag. Every opener (connect_tty / connect_telnet / Board.connect)
+# goes through acquire_channel, under _open_lock, so a second open attempt for an
+# already-open room is detected and reused instead of opening a duplicate handle.
+# A single reader thread per room handles display + parsing + script listeners.
+# -----------------------------------------------------------------------------
+def channel_is_open(room):
+    return bool(_channel_open.get(room))
+
+
+def _open_transport(kind, *, tty=None, host=None, port=None):
+    if kind == "serial":
+        return serial.Serial(_normalize_tty(tty), baudrate=115200, timeout=0)
+    s = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
+    s.settimeout(5)
+    s.connect((host, int(port)))
+    s.settimeout(None)
+    return s
+
+
+def acquire_channel(room, kind, *, tty=None, host=None, port=None):
+    """THE single place a channel is opened. Idempotent + locked: a given room
+    is opened at most once; a later/concurrent attempt reuses the live transport.
+    Returns (transport, newly_opened)."""
+    with _open_lock:
+        if _channel_open.get(room):
+            existing = active_telnets.get(room)
+            print(f"[CH] {room} already open — reuse (duplicate open ignored)")
+            return existing, False
+        transport = _open_transport(kind, tty=tty, host=host, port=port)
+        active_telnets[room] = transport
+        _channel_open[room]  = True
+        print(f"[CH] OPEN {room} ({kind})")
+        _start_channel_reader(room, transport, kind)
+        return transport, True
+
+
+def close_channel(room):
+    with _open_lock:
+        transport = active_telnets.pop(room, None)
+        _channel_open.pop(room, None)
+        active_boards.pop(room, None)
+    if transport is not None:
+        try:
+            transport.close()
+        except Exception:
+            pass
+    socketio.emit("terminal_closed", {"room": room}, room=room)
+
+
+def _start_channel_reader(room, transport, kind):
+    """One reader per channel. Always emits terminal_output + (pretty) blocks,
+    dispatches to the active board's listeners, streams run_output for scenarios,
+    and writes the session + raw logs. No conditional display suppression: since
+    a channel is opened only once, this is the only reader for it."""
+    is_vcom   = room.endswith("_vcom")
+    serial_id = room.split("_")[0]
+    stream    = "VCOM" if is_vcom else "ADMIN"
+
+    _room_parsers[room] = get_parser(TERMINAL_PARSER)
+    parse_line_buf = [""]
+
+    session_log = None
+    if is_vcom:
+        session_log = get_log_file(serial_id)
+        try:
+            with open(session_log, "a") as f:
+                f.write(f"# Session started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"# Board: {serial_id}  Room: {room}\n")
+        except Exception:
+            pass
+        _room_parsers[f"{serial_id}_session_log"] = session_log
+
+    import os as _os
+    raw_log_path = _os.path.join(
+        "logs",
+        f"{serial_id}_raw_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{stream.lower()}.log")
+    try:
+        _os.makedirs("logs", exist_ok=True)
+        with open(raw_log_path, "w") as _rf:
+            _rf.write(f"# room={room} kind={kind}\n")
+    except Exception:
+        raw_log_path = None
+
+    def reader():
+        print(f"[CH] reader started: {room}")
+        buf = []
+        room_parser = _room_parsers.get(room)
+        while channel_is_open(room):
+            try:
+                chunk = _t_recv(transport)
+                if not chunk:
+                    if _is_serial_transport(transport):
+                        time.sleep(0.005)
+                        continue
+                    break  # socket closed
+                text = chunk.decode("utf-8", errors="replace")
+
+                if raw_log_path:
+                    try:
+                        ts_raw = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        with open(raw_log_path, "a") as _rf:
+                            printable = text.replace("\r", "\\r").replace("\n", "\\n")
+                            _rf.write(f"[{ts_raw}][RX] {chunk.hex()}  |  {printable}\n")
+                    except Exception:
+                        pass
+
+                # Always display in the terminal
+                socketio.emit("terminal_output", {"data": text, "room": room}, room=room)
+
+                # Pretty blocks (Modern View)
+                if room_parser and TERMINAL_PRETTY:
+                    try:
+                        for block in _extract_blocks(text, parse_line_buf, room_parser,
+                                                     session_log=session_log, stream=stream):
+                            socketio.emit("terminal_block",
+                                          {**format_block(block), "room": room}, room=room)
+                    except Exception as _pe:
+                        print(f"[PARSER] {room}: {_pe}")
+
+                # Script listeners + scenario run streaming
+                board = active_boards.get(room)
+                if board:
+                    buf.append(text)
+                    combined  = "".join(buf)
+                    prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
+                    listeners = board._vcom_listeners if is_vcom else board._admin_listeners
+                    for listener in list(listeners):
+                        try: listener(combined)
+                        except Exception: pass
+                    if getattr(board, "run_id", None):
+                        socketio.emit("run_output",
+                                      {"serial": board.serial, "data": text,
+                                       "stream": stream.lower()},
+                                      room=f"run_{board.run_id}")
+                    if prompt in combined:
+                        buf.clear()
+            except Exception as e:
+                print(f"[CH] reader error {room}: {e}")
+                break
+
+        # ── teardown ──
+        if session_log:
+            try:
+                if parse_line_buf[0].strip():
+                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                    with open(session_log, "a") as f:
+                        f.write(f"[{ts}][{stream}] {parse_line_buf[0].strip()}\n")
+                with open(session_log, "a") as f:
+                    f.write(f"# Session ended: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            except Exception:
+                pass
+        if room_parser and TERMINAL_PRETTY and hasattr(room_parser, "flush"):
+            try:
+                for block in (room_parser.flush() or []):
+                    socketio.emit("terminal_block",
+                                  {**format_block(block), "room": room}, room=room)
+            except Exception:
+                pass
+        close_channel(room)
+
+    threading.Thread(target=reader, daemon=True).start()
+
+
 
 # Commands whose response is accumulated verbatim by the parser itself (railtest.py)
 _PASSTHROUGH_CMDS = {"help"}  # kept for reference, handled inside RailtestParser
@@ -962,240 +893,34 @@ def _extract_blocks(text: str, line_buf: list, parser,
 
 @socketio.on("connect_telnet")
 def handle_connect_telnet(data):
-    room    = data["room"]    # e.g. "440114849_vcom"
-    host    = data["host"]
-    port    = int(data["port"])
-    print(f"[TELNET] connect request: room={room} host={host} port={port}")
+    """IP board VCOM/ADMIN over TCP. Single open via the channel manager."""
+    room = data["room"]            # e.g. "440114849_vcom"
+    host = data["host"]
+    port = int(data["port"])
     join_room(room)
-
-    existing = active_telnets.get(room)
-    if existing:
-        try:
-            existing.send(b"")
-            print(f"[TELNET] already connected: {room}")
-            emit("terminal_ready", {"room": room})
-            return
-        except Exception:
-            print(f"[TELNET] stale socket removed: {room}")
-            try:
-                existing.close()
-            except Exception:
-                pass
-            active_telnets.pop(room, None)
-            active_boards.pop(room, None)
-
     try:
-        tn = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
-        tn.settimeout(5)
-        tn.connect((host, port))
-        tn.settimeout(None)
-        print(f"[TELNET] connected: {room}")
-
-        active_telnets[room] = tn
-
-        # Per-room parser and line buffer for pretty display
-        _room_parsers[room] = get_parser(TERMINAL_PARSER)
-        parse_line_buf    = [""]   # line fragment accumulator
-
-
-        # Session log — one file per terminal connection (vcom only, captures both channels)
-        serial_id = room.split("_")[0]
-        is_vcom   = room.endswith("_vcom")
-        session_log = None
-        log_line_buf = [""]   # line fragment accumulator for clean log lines
-        if is_vcom:
-            session_log = get_log_file(serial_id)
-            with open(session_log, "a") as f:
-                f.write(f"# Session started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"# Board: {serial_id}  Host: {host}  Port: {port}\n")
-            _room_parsers[f"{serial_id}_session_log"] = session_log
-
-        # Raw TCP log file — one per channel (VCOM and ADMIN)
-        import os as _os
-        _chan = "vcom" if is_vcom else "admin"
-        raw_log_path = _os.path.join(
-            "logs",
-            f"{serial_id}_raw_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{_chan}.log")
-        _os.makedirs("logs", exist_ok=True)
-        with open(raw_log_path, "w") as _rf:
-            _rf.write(f"# room={room} host={data.get('host','?')} port={data.get('port','?')}\n")
-
-        def reader():
-            print(f"[TELNET] reader started: {room}")
-            is_vcom = room.endswith("_vcom")
-            buf = []
-            room_parser = _room_parsers.get(room)
-            while True:
-                try:
-                    chunk = tn.recv(4096)
-                    if not chunk:
-                        print(f"[TELNET] empty chunk, closing: {room}")
-                        break
-                    # Raw log — VCOM only
-                    if raw_log_path:
-                        ts_raw = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        with open(raw_log_path, "a") as _rf:
-                            hex_str = chunk.hex()
-                            printable = chunk.decode("utf-8", errors="replace").replace("\r","\\r").replace("\n","\\n")
-                            _rf.write(f"[{ts_raw}][RX] {hex_str}  |  {printable}\n")
-                    text = chunk.decode("utf-8", errors="replace")
-                    # Always emit raw data for xterm (Classic mode)
-                    socketio.emit("terminal_output",
-                                  {"data": text, "room": room},
-                                  room=room)
-                    # Parse complete lines into display blocks for Modern mode
-                    if room_parser and TERMINAL_PRETTY:
-                        try:
-                            stream = "VCOM" if is_vcom else "ADMIN"
-                            for block in _extract_blocks(text, parse_line_buf, room_parser,
-                                                         session_log=session_log, stream=stream):
-                                socketio.emit("terminal_block",
-                                              {**format_block(block), "room": room}, room=room)
-                        except Exception as _pe:
-                            print(f"[PARSER] error: {_pe}")
-                    # Dispatch to board listeners (for script execution)
-                    board = active_boards.get(room)
-                    if board:
-                        buf.append(text)
-                        combined  = "".join(buf)
-                        prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
-                        listeners = board._vcom_listeners if is_vcom else board._admin_listeners
-                        for listener in list(listeners):
-                            try: listener(combined)
-                            except: pass
-                        if prompt in combined:
-                            buf.clear()
-                except Exception as e:
-                    print(f"[TELNET] reader error: {room}: {e}")
-                    break
-            if session_log:
-                # Flush any remaining fragment in parse_line_buf
-                if parse_line_buf[0].strip():
-                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                    stream = "VCOM" if is_vcom else "ADMIN"
-                    with open(session_log, "a") as f:
-                        f.write(f"[{ts}][{stream}] {parse_line_buf[0].strip()}\n")
-                with open(session_log, "a") as f:
-                    f.write(f"# Session ended: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            # Flush any block still open in the parser (e.g. a half-printed boot)
-            if room_parser and TERMINAL_PRETTY and hasattr(room_parser, "flush"):
-                try:
-                    for block in (room_parser.flush() or []):
-                        socketio.emit("terminal_block",
-                                      {**format_block(block), "room": room}, room=room)
-                except Exception:
-                    pass
-            try:
-                tn.close()
-            except Exception:
-                pass
-            if active_telnets.get(room) is tn:
-                active_telnets.pop(room, None)
-            if active_boards.get(room):
-                active_boards.pop(room, None)
-            socketio.emit("terminal_closed", {"room": room}, room=room)
-        threading.Thread(target=reader, daemon=True).start()
+        acquire_channel(room, "tcp", host=host, port=port)
         emit("terminal_ready", {"room": room})
-        print(f"[TELNET] terminal_ready emitted: {room}")
-
     except Exception as e:
-        if not data.get("_refreshed"):
-            try:
-                serial_id, kind = room.rsplit("_", 1)
-                fresh_info = get_connections(serial_id, force=True)
-                fresh_adapter = fresh_info.get("adapter", {})
-                fresh_ports = _ports_from(fresh_info)
-                fresh_connectivity = fresh_adapter.get("connectivityType", "usb")
-                fresh_host = fresh_adapter.get("host", "127.0.0.1") if fresh_connectivity != "usb" else "127.0.0.1"
-                fresh_port = fresh_ports.get("serial1" if kind == "vcom" else "admin")
-                if fresh_port:
-                    retry = dict(data)
-                    retry.update({"host": fresh_host, "port": str(fresh_port), "_refreshed": True})
-                    print(f"[TELNET] retry with refreshed SDM port: {room} {fresh_host}:{fresh_port}")
-                    return handle_connect_telnet(retry)
-            except Exception as refresh_error:
-                print(f"[TELNET] refresh after connection failure failed: {room}: {refresh_error}")
-        print(f"[TELNET] connection failed: {room}: {e}")
+        print(f"[CH] connect_telnet failed {room}: {e}")
         emit("terminal_error", {"message": str(e)})
 
 @socketio.on("disconnect_telnet")
 def handle_disconnect_telnet(data):
-    room = data.get("room")
-    tn   = active_telnets.pop(room, None)
-    active_boards.pop(room, None)
-    if tn:
-        try: tn.close()
-        except: pass
+    close_channel(data.get("room"))
 
 @socketio.on("connect_tty")
 def handle_connect_tty(data):
-    """EXPLICIT, MANUAL USB fallback — raw /dev/tty, VCOM only, no ADMIN.
-
-    Never triggered automatically: the UI only emits this after the user
-    presses the TTY-fallback button (shown when Silink failed to provide
-    ports). The reader is parser-aware so Modern View and cli() listeners
-    behave like the normal TCP path on this single VCOM channel.
-    """
-    room     = data["room"]
-    tty_path = _normalize_tty(data["tty"])
+    """USB board VCOM over the raw CDC tty (pyserial). Single open via the
+    channel manager — never opens the same tty twice."""
+    room = data["room"]
+    tty  = _normalize_tty(data["tty"])
     join_room(room)
-
-    if room in active_telnets:
-        emit("terminal_ready", {"room": room})
-        return
-
     try:
-        ser = serial.Serial(tty_path, baudrate=115200, timeout=0)
-        active_telnets[room] = ser
-
-        # Per-room parser + line buffer so Modern View blocks render here too
-        _room_parsers[room] = get_parser(TERMINAL_PARSER)
-        parse_line_buf = [""]
-
-        def reader():
-            buf = []
-            room_parser = _room_parsers.get(room)
-            while True:
-                try:
-                    chunk = ser.read(4096)
-                    if not chunk:
-                        time.sleep(0.005)
-                        continue
-                    text = chunk.decode("utf-8", errors="replace")
-                    socketio.emit("terminal_output",
-                                  {"data": text, "room": room}, room=room)
-                    # Modern View blocks
-                    if room_parser and TERMINAL_PRETTY:
-                        try:
-                            for block in _extract_blocks(text, parse_line_buf,
-                                                         room_parser, stream="VCOM"):
-                                socketio.emit("terminal_block",
-                                              {**format_block(block), "room": room},
-                                              room=room)
-                        except Exception as _pe:
-                            print(f"[PARSER] tty error: {_pe}")
-                    # Script support: feed VCOM listeners of the active board
-                    board = active_boards.get(room)
-                    if board:
-                        buf.append(text)
-                        combined = "".join(buf)
-                        for listener in list(board._vcom_listeners):
-                            try: listener(combined)
-                            except: pass
-                        if board._vcom_prompt in combined:
-                            buf.clear()
-                except Exception as e:
-                    print(f"[TELNET] tty reader error: {e}")
-                    break
-            socketio.emit("terminal_closed", {"room": room}, room=room)
-            active_telnets.pop(room, None)
-            active_boards.pop(room, None)
-
-        threading.Thread(target=reader, daemon=True).start()
+        acquire_channel(room, "serial", tty=tty)
         emit("terminal_ready", {"room": room})
-
     except Exception as e:
-        print(f"[ERROR] connect_tty {tty_path}: {e}")
+        print(f"[CH] connect_tty failed {room}: {e}")
         emit("terminal_error", {"message": str(e)})
 
 # Per-session input state for terminal channels
@@ -1208,7 +933,7 @@ def _tin_ts():
 
 
 def _tin_send(tn, s):
-    """Send a string to a telnet socket or serial port."""
+    """Send a string to a TCP socket or a pyserial port (transport-agnostic)."""
     b = s.encode("utf-8")
     if hasattr(tn, "sendall"):
         tn.sendall(b)
@@ -1309,13 +1034,7 @@ def api_jslog():
 def adapter_erase(serial):
     """Mass erase a single board from Manual Control."""
     try:
-        data   = get_connections(serial)
-        adapter = data.get("adapter", {})
-        conn_type = adapter.get("connectivityType", "usb")
-        if conn_type == "usb":
-            conn_flag = ["--serialno", serial]
-        else:
-            conn_flag = ["--ip", adapter.get("host", "")]
+        conn_flag, _ = _conn_flag(serial)
         cmd = [COMMANDER_PATH, "device", "masserase"] + conn_flag
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         invalidate_connections(serial)
@@ -1332,13 +1051,7 @@ def adapter_flash(serial):
     if not path or not os.path.isfile(path):
         return jsonify({"ok": False, "error": "file not found"}), 400
     try:
-        data   = get_connections(serial)
-        adapter = data.get("adapter", {})
-        conn_type = adapter.get("connectivityType", "usb")
-        if conn_type == "usb":
-            conn_flag = ["--serialno", serial]
-        else:
-            conn_flag = ["--ip", adapter.get("host", "")]
+        conn_flag, _ = _conn_flag(serial)
         cmd = [COMMANDER_PATH, "flash", path] + conn_flag
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         invalidate_connections(serial)
@@ -1350,25 +1063,10 @@ def adapter_flash(serial):
 
 @app.route("/api/adapter/<serial>/reset-mcu", methods=["POST"])
 def adapter_reset_mcu(serial):
-    """Reset the target MCU via Commander. Works on every adapter, including
-    USB ones with no admin console (where `target reset` over admin is a no-op)."""
-    try:
-        data    = get_connections(serial)
-        adapter = data.get("adapter", {})
-        conn_type = adapter.get("connectivityType", "usb")
-        if conn_type == "usb":
-            conn_flag = ["--serialno", serial]
-        else:
-            conn_flag = ["--ip", adapter.get("host", "")]
-        cmd = [COMMANDER_PATH, "device", "reset"] + conn_flag
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        ok = result.returncode == 0
-        msg = (result.stdout if ok else result.stderr).strip()
-        print(f"[RST-MCU] {serial} via commander: {'ok' if ok else msg}")
-        return jsonify({"ok": ok, "msg": msg})
-    except Exception as e:
-        print(f"[RST-MCU] {serial} error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+    """Reset the target MCU via pycommander. Works on every adapter, including
+    USB ones with no admin console."""
+    ok, msg = reset_mcu(serial)
+    return jsonify({"ok": ok, "msg": msg})
 
 
 @app.route("/api/adapter/<serial>/admin-cmd", methods=["POST"])
@@ -1376,49 +1074,16 @@ def admin_cmd(serial):
     cmd  = request.json.get("cmd", "")
     room = f"{serial}_admin"
     tn   = active_telnets.get(room)
-
+    # No SDM/Silink: an admin channel exists only if a terminal opened one
+    # (IP boards). USB adapters have no admin console.
     if not tn:
-        # Connect on demand — same 127.0.0.1+silink (USB) / IP path as everywhere
-        try:
-            ep   = resolve_endpoint(serial, force=True)
-            host = ep["host"]
-            port = ep["admin_port"]
-
-            tn = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
-            tn.settimeout(5)
-            tn.connect((host, port))
-            tn.settimeout(None)
-            active_telnets[room] = tn
-
-            # Start reader thread
-            def reader():
-                while True:
-                    try:
-                        chunk = tn.recv(4096)
-                        if not chunk:
-                            break
-                        socketio.emit("terminal_output",
-                                      {"data": chunk.decode("utf-8", errors="replace"), "room": room},
-                                      room=room)
-                    except Exception:
-                        break
-                active_telnets.pop(room, None)
-
-            threading.Thread(target=reader, daemon=True).start()
-            print(f"[INFO] admin-cmd: auto-connected to {host}:{port} for {serial}")
-
-        except Exception as e:
-            print(f"[ERROR] admin-cmd connect failed {serial}: {e}")
-            return jsonify({"ok": False, "error": f"not connected and auto-connect failed: {str(e)}"}), 400
-
+        return jsonify({"ok": False, "error": "no admin console for this adapter"}), 400
     try:
-        tn.sendall((cmd + "\r\n").encode("utf-8"))
-        socketio.emit("terminal_echo",
-                      {"data": f"› {cmd}", "room": room},
-                      room=room)
+        _t_send(tn, (cmd + "\r\n").encode("utf-8"))
+        socketio.emit("terminal_echo", {"data": f"› {cmd}", "room": room}, room=room)
         return jsonify({"ok": True})
     except Exception as e:
-        active_telnets.pop(room, None)
+        close_channel(room)
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/scenarios")
@@ -1558,13 +1223,11 @@ def scenario_check():
 
     scenario_dir = os.path.abspath(scenario_dir)
 
-    # Load available adapters
+    # Load available adapters (pycommander)
     try:
-        adapters_data = requests.get(f"{SDM_BASE}/api/adapters", timeout=3).json()
-        if isinstance(adapters_data, dict):
-            adapters_data = adapters_data.get("adapters", [])
+        adapters_data = _adapters_compat()
     except Exception as e:
-        return jsonify({"ok": False, "issues": [{"line": None, "msg": f"Cannot reach SDM: {e}"}]}), 500
+        return jsonify({"ok": False, "issues": [{"line": None, "msg": f"Cannot enumerate adapters: {e}"}]}), 500
 
     # Build adapter lookup maps
     # host → adapter, serialNumber → adapter
@@ -1622,17 +1285,8 @@ def scenario_check():
         board_id = board.get("board", "")
         if not board_id:
             issue("board", "'board' is mandatory and is empty")
-        else:
-            # Validate with SDM
-            try:
-                result = subprocess.run(
-                    [SDM_PATH, "board", "search", "-s", str(board_id)],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode != 0:
-                    issue("board", f"board '{board_id}' not found in SDM")
-            except Exception as e:
-                issue("board", f"board search failed: {e}")
+        # Note: board-ID validation against the SDM board database was removed
+        # with SDM. Board correctness is now confirmed at flash time by Commander.
 
         # ── connection (optional, replaces jlink_name_or_ip) ──
         # Accepts both old key (jlink_name_or_ip) and new key (connection)
@@ -1641,7 +1295,7 @@ def scenario_check():
             connection = "usb"
         matched_adapter = None
         if _is_loopback_host(connection):
-            issue("connection", "127.0.0.1/localhost is a local Silink transport host, not a USB adapter identity. Use 'usb' or the adapter serial number.")
+            issue("connection", "127.0.0.1/localhost is not an adapter identity. Use 'usb' or the adapter serial number.")
 
         if connection != "usb":
             if not is_valid_ip(connection) and not is_valid_serial(connection):
@@ -1826,7 +1480,7 @@ class Scenario:
         """
         Access a board by:
           - int   → index in YAML order (0-based)
-          - str   → serial number, scenario nickname, or SDM nickname
+          - str   → serial number, scenario nickname, or adapter nickname
         Raises ValueError with a helpful message if not found.
         """
         if isinstance(identifier, int):
@@ -2077,7 +1731,7 @@ class Board:
     def __init__(self, serial, host, vcom_port, admin_port,
                  run_id, scenario_dir, open_terminal=False, nickname=None):
         self.serial        = serial
-        self.nickname      = nickname  # scenario nickname (overrides SDM nickname)
+        self.nickname      = nickname  # scenario nickname (overrides adapter nickname)
         self.host          = host
         self.vcom_port     = vcom_port
         self.admin_port    = admin_port
@@ -2120,117 +1774,42 @@ class Board:
 
     # ── connect ──────────────────────────────────────────────
     def connect(self):
+        """Acquire the VCOM channel (single open, shared with the terminal).
+        Transport is resolved from pycommander: USB -> CDC tty, IP -> TCP:4901.
+        No SDM/Silink. ADMIN is reused only if a terminal opened it."""
         vcom_room  = f"{self.serial}_vcom"
         admin_room = f"{self.serial}_admin"
 
-        for room, port, attr in [
-            (vcom_room,  self.vcom_port,  "_vcom_sock"),
-            (admin_room, self.admin_port, "_admin_sock"),
-        ]:
-            # Always register this Board as the active dispatcher for this room.
-            # The reader thread uses active_boards[room] at dispatch time, so
-            # reusing a socket across runs automatically picks up the new Board.
-            active_boards[room] = self
+        # Register as dispatcher BEFORE acquiring so the reader routes RX to this
+        # Board's listeners as soon as it starts.
+        active_boards[vcom_room]  = self
+        active_boards[admin_room] = self
 
-            if room in active_telnets:
-                setattr(self, attr, active_telnets[room])
-                print(f"[RUN] reusing existing connection for {room}")
-                socketio.emit("terminal_ready", {"room": room}, room=room)
+        if channel_is_open(vcom_room):
+            self._vcom_sock = active_telnets.get(vcom_room)
+            print(f"[RUN] reusing VCOM channel for {vcom_room}")
+        else:
+            ep = resolve_vcom(self.serial)
+            if ep.kind == "serial":
+                self.host, self.vcom_port = "127.0.0.1", 0
+                tx, _ = acquire_channel(vcom_room, "serial", tty=ep.tty)
             else:
-                s = sock_module.socket(sock_module.AF_INET, sock_module.SOCK_STREAM)
-                s.settimeout(5)
-                try:
-                    s.connect((self.host, port))
-                except OSError:
-                    if _is_loopback_host(self.host):
-                        fresh_info = get_connections(self.serial, force=True)
-                        fresh_ports = _ports_from(fresh_info)
-                        port_name = "serial1" if room.endswith("_vcom") else "admin"
-                        refreshed_port = fresh_ports.get(port_name)
-                        if refreshed_port:
-                            port = int(refreshed_port)
-                            if room.endswith("_vcom"):
-                                self.vcom_port = port
-                            else:
-                                self.admin_port = port
-                            print(f"[RUN] retry {room} with refreshed port {self.host}:{port}")
-                            s.connect((self.host, port))
-                        else:
-                            raise
-                    else:
-                        raise
-                s.settimeout(None)
-                active_telnets[room] = s
-                setattr(self, attr, s)
-                self._start_reader(s, room)
-                print(f"[RUN] new connection for {room}")
-                socketio.emit("terminal_ready", {"room": room}, room=room)
+                self.host, self.vcom_port = ep.host, ep.port
+                tx, _ = acquire_channel(vcom_room, "tcp", host=ep.host, port=ep.port)
+            self._vcom_sock = tx
+        socketio.emit("terminal_ready", {"room": vcom_room}, room=vcom_room)
+
+        # No SDM/Silink admin port; reuse one only if a terminal opened it.
+        self._admin_sock = active_telnets.get(admin_room)
 
         if self.open_terminal_flag:
             def _open():
                 url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}?from_run=1"
                 webview.create_window(
-                    f"{self.serial} — Terminal",
-                    url,
-                    width=820, height=620,
-                    resizable=True
-                )
+                    f"{self.serial} — Terminal", url,
+                    width=820, height=620, resizable=True)
             threading.Thread(target=_open, daemon=True).start()
 
-    def _start_reader(self, sock, room):
-        is_vcom  = room.endswith("_vcom")
-        stream   = "vcom" if is_vcom else "admin"
-        buf      = []
-        parse_line_buf    = [""]
-        def flush(board):
-            if not buf:
-                return
-            text = "".join(buf)
-            buf.clear()
-            run_room = f"run_{board.run_id}"
-            socketio.emit("run_output",
-                          {"serial": board.serial, "data": text, "stream": stream},
-                          room=run_room)
-
-        def reader():
-            while True:
-                try:
-                    chunk = _t_recv(sock)
-                    if not chunk:
-                        if _is_serial_transport(sock):
-                            time.sleep(0.005)
-                            continue
-                        break
-                    text = chunk.decode("utf-8", errors="replace")
-                    board = active_boards.get(room)
-                    # Only emit terminal_output if connect_telnet is NOT already running
-                    # (to avoid double-display — connect_telnet reader handles terminal_block)
-                    if room not in active_telnets or active_telnets.get(room) is not sock:
-                        socketio.emit("terminal_output",
-                                      {"data": text, "room": room},
-                                      room=room)
-                    if board:
-                        # Session log and listeners (for cli() script support)
-                        buf.append(text)
-                        prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
-                        combined  = "".join(buf)
-                        listeners = board._vcom_listeners if is_vcom else board._admin_listeners
-                        for listener in list(listeners):
-                            try: listener(combined)
-                            except: pass
-                        if prompt in combined:
-                            flush(board)
-                except Exception:
-                    break
-            board = active_boards.get(room)
-            if board and buf:
-                flush(board)
-            active_telnets.pop(room, None)
-            active_boards.pop(room, None)
-
-        threading.Thread(target=reader, daemon=True).start()
-
-    # ── VCOM ─────────────────────────────────────────────────
     def write_cli(self, data):
         if self._vcom_sock:
             if isinstance(data, str):
@@ -2386,11 +1965,12 @@ class Board:
     def reset(self, settle=1.0):
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[RST] {self.nickname or self.serial} {ts}")
-        # Fire-and-forget: the WSTK admin console does not reliably echo a
-        # prompt after `target reset`, so do NOT block on admin().wait().
-        # The real "board is back" signal is the boot banner on VCOM, which a
-        # script can wait for explicitly if needed.
-        self._send_admin_raw("target reset 100")
+        # Reset the MCU through pycommander (device reset) — independent of the
+        # admin console, so it actually resets on USB adapters too. The board's
+        # boot banner then appears on VCOM; a script can wait for it if needed.
+        ok, msg = reset_mcu(self.serial)
+        if not ok:
+            print(f"[RST] {self.serial} reset failed: {msg}")
         time.sleep(settle)
         return ""
 
@@ -2521,6 +2101,46 @@ class Board:
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[DLY] {self.nickname or self.serial} {ts} {seconds}s")
         time.sleep(seconds)
+
+    def wait_vcom_ready(self, timeout=5.0, settle=0.2):
+        """Ensure the VCOM transport is open AND the channel has settled before
+        the script sends its first command. Avoids writing to a serial port that
+        has just opened (CDC line settling / board still booting) — which is why
+        early commands were getting lost."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            t = self._vcom_sock
+            open_ok = t is not None and (not _is_serial_transport(t)
+                                         or getattr(t, "is_open", False))
+            if open_ok:
+                # transport is open; let any open/boot noise settle before TX
+                self.sync(idle=settle, timeout=max(0.0, deadline - time.monotonic()))
+                return True
+            time.sleep(0.05)
+        return False
+
+    def sync(self, idle=0.3, timeout=3.0):
+        """Block until the VCOM channel has been quiet for `idle` seconds, i.e.
+        the last command's response + prompt have finished arriving. Used to
+        order the end-of-script banner *after* the final output instead of
+        racing it — same idea as waiting for a command's prompt."""
+        if not self._vcom_sock:
+            return
+        last = [time.monotonic()]
+        def on_data(_combined):
+            last[0] = time.monotonic()
+        self._vcom_listeners.append(on_data)
+        deadline = time.monotonic() + timeout
+        try:
+            while time.monotonic() < deadline:
+                if time.monotonic() - last[0] >= idle:
+                    break
+                time.sleep(0.05)
+        finally:
+            try:
+                self._vcom_listeners.remove(on_data)
+            except ValueError:
+                pass
 
     def checkpoint(self, name):
         """Signal to the global scenario script that this board has reached a named point."""
@@ -2659,23 +2279,14 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         emit_status("error", "Flash failed")
         return
 
-    # Get ports — unified 127.0.0.1+silink (USB) / IP path
+    # Connect — Board.connect() resolves the VCOM endpoint from pycommander
+    # (USB tty / IP TCP) and reuses an open terminal channel if present.
     emit_status("connecting")
-    try:
-        ep = resolve_endpoint(serial, force=True)
-        host, vcom_port, admin_port = ep["host"], ep["vcom_port"], ep["admin_port"]
-        print(f"[RUN] host={host} vcom={vcom_port} admin={admin_port}")
-    except Exception as e:
-        print(f"[RUN] endpoint exception: {e}")
-        emit_status("error", f"SDM error: {e}")
-        return
-
-    # Create Board instance and connect
     board = Board(
         serial        = serial,
-        host          = host,
-        vcom_port     = vcom_port,
-        admin_port    = admin_port,
+        host          = "",
+        vcom_port     = 0,
+        admin_port    = 0,
         run_id        = run_id,
         scenario_dir  = scenario_dir,
         open_terminal = board_cfg.get("open_terminal", False),
@@ -2683,7 +2294,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
     )
     board._log_path = log_path
     try:
-        print(f"[RUN] connecting board {serial} host={host} vcom={vcom_port} admin={admin_port}")
+        print(f"[RUN] connecting board {serial}")
         board.connect()
         print(f"[RUN] board connected {serial}")
     except Exception as e:
@@ -2727,15 +2338,13 @@ def scenario_run():
     if not boards_cfg:
         return jsonify({"ok": False, "error": "No boards defined"}), 400
 
-    # Fetch available adapters from SDM
+    # Fetch available adapters (pycommander)
     try:
-        adapters_data = requests.get(f"{SDM_BASE}/api/adapters", timeout=3).json()
-        if isinstance(adapters_data, dict):
-            adapters_data = adapters_data.get("adapters", [])
+        adapters_data = _adapters_compat()
         adapter_by_host   = {a.get("host"): a for a in adapters_data if a.get("host") and not _is_loopback_host(a.get("host"))}
         adapter_by_serial = {a.get("serialNumber"): a for a in adapters_data if a.get("serialNumber")}
     except Exception as e:
-        return jsonify({"ok": False, "error": f"Cannot reach SDM: {e}"}), 500
+        return jsonify({"ok": False, "error": f"Cannot enumerate adapters: {e}"}), 500
 
     # Resolve each board entry
     resolved_boards = []
@@ -2773,7 +2382,7 @@ def scenario_run():
             if not adapter and adapters_data:
                 adapter = adapters_data[0]
             # If the chosen adapter is reachable via a real external IP, use it
-            # 127.0.0.1 means the board is local (USB via SDM) — keep connection=usb
+            # 127.0.0.1 means the board is local (USB) — keep connection=usb
             if adapter:
                 adapter_host = adapter.get("host", "").strip()
                 if adapter_host and adapter_host != "127.0.0.1":
@@ -2786,10 +2395,10 @@ def scenario_run():
         bc["_resolved_serial"] = adapter.get("serialNumber")
         bc["connection"]       = connection
 
-        # Nickname resolution: YAML > SDM > None
-        yaml_nick = str(b.get("nickname", "")).strip() or None
-        sdm_nick  = adapter.get("nickname") or None
-        bc["_nickname"] = yaml_nick or sdm_nick
+        # Nickname resolution: YAML > adapter > None
+        yaml_nick     = str(b.get("nickname", "")).strip() or None
+        adapter_nick  = adapter.get("nickname") or None
+        bc["_nickname"] = yaml_nick or adapter_nick
 
         resolved_boards.append(bc)
 
@@ -2876,12 +2485,9 @@ def scenario_run():
                               {"serial": serial, "status": "connecting"},
                               room=run_room)
                 try:
-                    ep = resolve_endpoint(serial, force=True)
                     board_obj = Board(
                         serial        = serial,
-                        host          = ep["host"],
-                        vcom_port     = ep["vcom_port"],
-                        admin_port    = ep["admin_port"],
+                        host          = "", vcom_port = 0, admin_port = 0,
                         run_id        = run_id,
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),
@@ -2969,12 +2575,9 @@ def scenario_run():
                               {"serial": serial, "status": "connecting"},
                               room=run_room)
                 try:
-                    ep = resolve_endpoint(serial, force=True)
                     board_obj = Board(
                         serial        = serial,
-                        host          = ep["host"],
-                        vcom_port     = ep["vcom_port"],
-                        admin_port    = ep["admin_port"],
+                        host          = "", vcom_port = 0, admin_port = 0,
                         run_id        = run_id,
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),
@@ -3049,8 +2652,6 @@ if __name__ == "__main__":
     if not TRACES:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
-
-    restart_sdm()
 
     import logging
     log_level = logging.DEBUG if TRACES else logging.ERROR
