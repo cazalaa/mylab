@@ -24,6 +24,3 @@ def script(board):
     # --- Transmit 1 packet ---
     board.print("--- send 1 packet using CLI ---" )
     board.cli("tx 1")
-    
-    board.print("--- send 1 packet using button ---" )
-    board.button(0, 0.3)

@@ -585,7 +585,7 @@ def terminal_run_script():
 
             # connect() reuses the terminal's open channel if present, else opens
             # fresh via pycommander (USB tty / IP TCP). Single source of truth.
-            board_obj = Board(serial=serial, host="", vcom_port=0, admin_port=0,
+            board_obj = Board(serial=serial, host="", vcom_port=0,
                               run_id=None, scenario_dir="")
             try:
                 board_obj.connect()
@@ -594,8 +594,7 @@ def terminal_run_script():
                 return
 
             # Ensure the channel reader dispatches RX to this board
-            active_boards[f"{serial}_vcom"]  = board_obj
-            active_boards[f"{serial}_admin"] = board_obj
+            active_boards[f"{serial}_vcom"] = board_obj
 
             # Don't send anything until the VCOM connection is open & settled
             if not board_obj.wait_vcom_ready():
@@ -639,10 +638,8 @@ def terminal_info(serial_number):
             "serial":          serial_number,
             "host":            v.host,
             "vcom":            v.port,
-            "admin":           None,
             "tty":             None,
             "connectivity":    "ip",
-            "admin_available": False,
             "label":           v.label or serial_number,
             "nickname":        v.nickname,
         })
@@ -651,10 +648,8 @@ def terminal_info(serial_number):
         "serial":          serial_number,
         "host":            "127.0.0.1",
         "vcom":            None,
-        "admin":           None,
         "tty":             v.tty,
         "connectivity":    "usb",
-        "admin_available": False,
         "label":           v.label or serial_number,
         "nickname":        v.nickname,
     })
@@ -671,7 +666,7 @@ _room_parsers  = {}   # room_id -> BaseParser (for interactive terminal pretty d
 
 
 # -----------------------------------------------------------------------------
-# Channel manager — a VCOM/ADMIN channel is opened EXACTLY ONCE per room.
+# Channel manager — a VCOM channel is opened EXACTLY ONCE per room.
 # -----------------------------------------------------------------------------
 # `active_telnets[room]` holds the single transport; `_channel_open[room]` is the
 # explicit flag. Every opener (connect_tty / connect_telnet / Board.connect)
@@ -730,7 +725,7 @@ def _start_channel_reader(room, transport, kind):
     a channel is opened only once, this is the only reader for it."""
     is_vcom   = room.endswith("_vcom")
     serial_id = room.split("_")[0]
-    stream    = "VCOM" if is_vcom else "ADMIN"
+    stream    = "VCOM"
 
     _room_parsers[room] = get_parser(TERMINAL_PARSER)
     parse_line_buf = [""]
@@ -798,8 +793,8 @@ def _start_channel_reader(room, transport, kind):
                 if board:
                     buf.append(text)
                     combined  = "".join(buf)
-                    prompt    = board._vcom_prompt if is_vcom else board._admin_prompt
-                    listeners = board._vcom_listeners if is_vcom else board._admin_listeners
+                    prompt    = board._vcom_prompt
+                    listeners = board._vcom_listeners
                     for listener in list(listeners):
                         try: listener(combined)
                         except Exception: pass
@@ -893,7 +888,7 @@ def _extract_blocks(text: str, line_buf: list, parser,
 
 @socketio.on("connect_telnet")
 def handle_connect_telnet(data):
-    """IP board VCOM/ADMIN over TCP. Single open via the channel manager."""
+    """IP board VCOM over TCP. Single open via the channel manager."""
     room = data["room"]            # e.g. "440114849_vcom"
     host = data["host"]
     port = int(data["port"])
@@ -923,9 +918,8 @@ def handle_connect_tty(data):
         print(f"[CH] connect_tty failed {room}: {e}")
         emit("terminal_error", {"message": str(e)})
 
-# Per-session input state for terminal channels
-_admin_input_buf = {}  # key -> current (unterminated) line being typed
-_admin_fwd       = {}  # key -> portion of the current line already sent live (admin)
+# Per-session input state for the terminal channel
+_input_buf = {}  # key -> current (unterminated) line being typed
 
 
 def _tin_ts():
@@ -953,71 +947,40 @@ def _tin_log(serial_id, stream, cmd):
 
 @socketio.on("terminal_input")
 def handle_terminal_input(data):
-    """Accept input as single keystrokes (xterm) OR whole lines (input bar / buttons).
-
-    VCOM  : the command is held until the line is complete, then sent in one shot
-            (avoids the echo/response race). notify_cmd(echo=True) lets the parser
-            recognise the board's echo and open the command block.
-    ADMIN : printable keystrokes are forwarded live so the console echoes as you
-            type; on the terminating newline the parser is told echo=False and the
-            command block is emitted straight away (admin has no board echo).
-    """
+    """VCOM input from xterm (single keystrokes) or the input bar (whole lines).
+    The command is held until the line is complete, then sent in one shot to
+    avoid the echo/response race; notify_cmd(echo=True) lets the parser
+    recognise the board's echo and open the command block."""
     room = data.get("room")
     tn   = active_telnets.get(room)
     if not tn:
         return
     try:
         serial_id = room.split("_")[0]
-        is_vcom   = room.endswith("_vcom")
-        stream    = "VCOM" if is_vcom else "ADMIN"
         key       = f"{room}_{request.sid}"
         raw       = data.get("data", "")
         rp        = _room_parsers.get(room)
 
-        # Backspace / delete — edit the buffer (and the live console for admin)
+        # Backspace / delete — edit the buffer
         if raw in ("\x7f", "\x08"):
-            _admin_input_buf[key] = _admin_input_buf.get(key, "")[:-1]
-            if not is_vcom:
-                _tin_send(tn, raw)
-                fwd = _admin_fwd.get(key, "")
-                if fwd:
-                    _admin_fwd[key] = fwd[:-1]
+            _input_buf[key] = _input_buf.get(key, "")[:-1]
             return
 
-        # Admin: forward live printable keystrokes so the console echoes immediately
-        if not is_vcom and "\r" not in raw and "\n" not in raw and raw:
-            _tin_send(tn, raw)
-            _admin_fwd[key] = _admin_fwd.get(key, "") + raw
-
         # Accumulate and split into complete lines
-        buf   = _admin_input_buf.get(key, "") + raw
+        buf   = _input_buf.get(key, "") + raw
         norm  = buf.replace("\r\n", "\n").replace("\r", "\n")
         parts = norm.split("\n")
-        _admin_input_buf[key] = parts[-1]          # keep the unterminated tail
+        _input_buf[key] = parts[-1]          # keep the unterminated tail
         complete = parts[:-1]
 
         for line in complete:
             cmd = line.strip()
-            if is_vcom:
-                if not cmd:
-                    continue
-                if rp and TERMINAL_PRETTY and hasattr(rp, "notify_cmd"):
-                    rp.notify_cmd(cmd, ts=_tin_ts(), echo=True)
-                _tin_send(tn, cmd + "\r\n")
-                _tin_log(serial_id, stream, cmd)
-            else:
-                # Admin: send only the part not already forwarded live, plus the newline
-                fwd = _admin_fwd.get(key, "")
-                remainder = line[len(fwd):] if line.startswith(fwd) else line
-                _tin_send(tn, remainder + "\r\n")
-                _admin_fwd[key] = ""
-                if cmd:
-                    if rp and TERMINAL_PRETTY and hasattr(rp, "notify_cmd"):
-                        for blk in (rp.notify_cmd(cmd, ts=_tin_ts(), echo=False) or []):
-                            socketio.emit("terminal_block",
-                                          {**format_block(blk), "room": room}, room=room)
-                    _tin_log(serial_id, stream, cmd)
-                    socketio.emit("terminal_cmd", {"data": cmd, "room": room}, room=room)
+            if not cmd:
+                continue
+            if rp and TERMINAL_PRETTY and hasattr(rp, "notify_cmd"):
+                rp.notify_cmd(cmd, ts=_tin_ts(), echo=True)
+            _tin_send(tn, cmd + "\r\n")
+            _tin_log(serial_id, "VCOM", cmd)
     except Exception as e:
         emit("terminal_error", {"message": str(e)})
 
@@ -1068,23 +1031,6 @@ def adapter_reset_mcu(serial):
     ok, msg = reset_mcu(serial)
     return jsonify({"ok": ok, "msg": msg})
 
-
-@app.route("/api/adapter/<serial>/admin-cmd", methods=["POST"])
-def admin_cmd(serial):
-    cmd  = request.json.get("cmd", "")
-    room = f"{serial}_admin"
-    tn   = active_telnets.get(room)
-    # No SDM/Silink: an admin channel exists only if a terminal opened one
-    # (IP boards). USB adapters have no admin console.
-    if not tn:
-        return jsonify({"ok": False, "error": "no admin console for this adapter"}), 400
-    try:
-        _t_send(tn, (cmd + "\r\n").encode("utf-8"))
-        socketio.emit("terminal_echo", {"data": f"› {cmd}", "room": room}, room=room)
-        return jsonify({"ok": True})
-    except Exception as e:
-        close_channel(room)
-        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/scenarios")
 def list_scenarios():
@@ -1504,7 +1450,7 @@ class Scenario:
         """Send reset to all boards simultaneously (parallel)."""
         self.print("[scenario] release_reset — resetting all boards in parallel")
         with ThreadPoolExecutor(max_workers=len(self._boards)) as ex:
-            futures = {ex.submit(b.admin, "reset"): b for b in self._boards}
+            futures = {ex.submit(b.reset): b for b in self._boards}
             for fut in as_completed(futures):
                 b = futures[fut]
                 try:
@@ -1698,7 +1644,7 @@ LINE_ENDINGS = {"CR": b"\r", "LF": b"\n", "CRLF": b"\r\n"}
 
 
 # ── Transport helpers ────────────────────────────────────────
-# A VCOM/ADMIN channel is either a TCP socket (IP boards) or a pyserial
+# A VCOM channel is either a TCP socket (IP boards) or a pyserial
 # Serial object (USB CDC). These wrappers let Board treat both identically.
 def _is_serial_transport(t):
     return isinstance(t, serial.Serial)
@@ -1724,38 +1670,29 @@ def _t_settimeout(t, timeout):
 
 class Board:
     """
-    Wraps VCOM + ADMIN telnet connections for one board.
+    Wraps the VCOM connection (pyserial tty for USB / TCP:4901 for IP) for one board.
     Connected before script runs, never closed automatically.
     """
 
-    def __init__(self, serial, host, vcom_port, admin_port,
+    def __init__(self, serial, host, vcom_port,
                  run_id, scenario_dir, open_terminal=False, nickname=None):
         self.serial        = serial
         self.nickname      = nickname  # scenario nickname (overrides adapter nickname)
         self.host          = host
         self.vcom_port     = vcom_port
-        self.admin_port    = admin_port
         self.run_id        = run_id
         self.scenario_dir  = scenario_dir
         self.open_terminal_flag = open_terminal
 
-        # Sockets (set in connect())
+        # Socket (set in connect())
         self._vcom_sock  = None
-        self._admin_sock = None
 
-        # Config (set by script via config_vcom / config_admin)
+        # Config (set by script via config_vcom)
         self._vcom_le     = b"\r\n"
         self._vcom_echo   = True
         self._vcom_prompt = ">"
-        self._admin_le    = b"\r\n"
-        self._admin_echo  = False
-        self._admin_prompt = ">"
-        # None = unknown, True = console responded, False = no admin console
-        # (some USB adapters accept the TCP connection but have no admin CLI).
-        self._admin_alive = None
 
         self._vcom_listeners  = []
-        self._admin_listeners = []
         self._vcom_expecting_echo = [False]  # ← default, always valid
         self._log_path = None
         self._scenario_ctx = None  # set by Scenario when global script is used
@@ -1767,23 +1704,15 @@ class Board:
         self._vcom_echo   = echo
         self._vcom_prompt = prompt
 
-    def config_admin(self, line_ending="CRLF", echo=False, prompt=">"):
-        self._admin_le     = LINE_ENDINGS.get(line_ending.upper(), b"\r\n")
-        self._admin_echo   = echo
-        self._admin_prompt = prompt
-
     # ── connect ──────────────────────────────────────────────
     def connect(self):
         """Acquire the VCOM channel (single open, shared with the terminal).
-        Transport is resolved from pycommander: USB -> CDC tty, IP -> TCP:4901.
-        No SDM/Silink. ADMIN is reused only if a terminal opened it."""
-        vcom_room  = f"{self.serial}_vcom"
-        admin_room = f"{self.serial}_admin"
+        Transport is resolved from pycommander: USB -> CDC tty, IP -> TCP:4901."""
+        vcom_room = f"{self.serial}_vcom"
 
         # Register as dispatcher BEFORE acquiring so the reader routes RX to this
         # Board's listeners as soon as it starts.
-        active_boards[vcom_room]  = self
-        active_boards[admin_room] = self
+        active_boards[vcom_room] = self
 
         if channel_is_open(vcom_room):
             self._vcom_sock = active_telnets.get(vcom_room)
@@ -1798,9 +1727,6 @@ class Board:
                 tx, _ = acquire_channel(vcom_room, "tcp", host=ep.host, port=ep.port)
             self._vcom_sock = tx
         socketio.emit("terminal_ready", {"room": vcom_room}, room=vcom_room)
-
-        # No SDM/Silink admin port; reuse one only if a terminal opened it.
-        self._admin_sock = active_telnets.get(admin_room)
 
         if self.open_terminal_flag:
             def _open():
@@ -1883,84 +1809,6 @@ class Board:
         while lines and lines[-1].strip() in (prompt, ""):
             lines.pop()
         return "\n".join(lines)
-
-    # ── ADMIN ────────────────────────────────────────────────
-    def _send_admin_raw(self, cmd):
-        if not self._admin_sock:
-            return
-        payload = cmd.encode("utf-8") + self._admin_le
-        _t_send(self._admin_sock, payload)
-        admin_room = f"{self.serial}_admin"
-        socketio.emit("terminal_echo",
-                      {"data": f"{cmd}", "room": admin_room},
-                      room=admin_room)
-        socketio.emit("terminal_cmd",
-                      {"data": cmd, "room": admin_room},
-                      room=admin_room)
-
-    def admin(self, cmd, timeout=10.0):
-        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        print(f"[ADM] {self.nickname or self.serial} {ts} >>> {cmd}")
-        # High-level interpretation
-        cmd_lower = cmd.strip().lower()
-        if cmd_lower == "reset":
-            raw = "target reset 100"
-        elif cmd_lower in ("pb0", "button0"):
-            self._send_admin_raw("target button press 0")
-            time.sleep(0.1)
-            self._send_admin_raw("target button release 0")
-            return ""
-        elif cmd_lower in ("pb1", "button1"):
-            self._send_admin_raw("target button press 1")
-            time.sleep(0.1)
-            self._send_admin_raw("target button release 1")
-            return ""
-        else:
-            raw = cmd
-
-        if not self._admin_sock:
-            return ""
-
-        # If a previous call already proved this adapter has no admin console,
-        # don't block for `timeout` again — return immediately.
-        if self._admin_alive is False:
-            self._send_admin_raw(raw)  # still forward it, in case it matters
-            print(f"[ADM] {self.nickname or self.serial} (no admin console — not waiting)")
-            return ""
-
-        # Register listener BEFORE sending the command to avoid missing
-        # responses that arrive immediately (race condition on fast/USB boards)
-        event    = threading.Event()
-        response = []
-        prompt   = self._admin_prompt
-
-        def on_data(combined):
-            if prompt in combined:
-                response.append(combined)
-                event.set()
-
-        self._admin_listeners.append(on_data)
-
-        _t_send(self._admin_sock, (raw + self._admin_le.decode()).encode("utf-8"))
-        admin_room = f"{self.serial}_admin"
-        socketio.emit("terminal_echo",
-                      {"data": f"\\{raw}", "room": admin_room},
-                      room=admin_room)
-
-        event.wait(timeout=timeout)
-        self._admin_listeners.remove(on_data)
-        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        timed_out = not event.is_set()
-        if timed_out:
-            # First proof that this adapter has no working admin console.
-            if self._admin_alive is None:
-                print(f"[ADM] {self.nickname or self.serial} — admin console "
-                      f"silent; marking admin unavailable for this board.")
-            self._admin_alive = False
-        else:
-            self._admin_alive = True
-        print(f"[ADM] {self.nickname or self.serial} {ts} <<< {'TIMEOUT' if timed_out else 'ok'}")
-        return "".join(response)
 
     def reset(self, settle=1.0):
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -2061,13 +1909,6 @@ class Board:
 
         _emit(f"Flash complete — {_os.path.basename(firmware_path)}")
         return True
-
-    def button(self, pb, duration=0.1):
-        if not self._admin_sock:
-            return
-        self._send_admin_raw(f"target button press {pb}")
-        time.sleep(duration)
-        self._send_admin_raw(f"target button release {pb}")
 
     # ── helpers ───────────────────────────────────────────────
     def _read_until(self, sock, prompt, timeout):
@@ -2286,7 +2127,6 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         serial        = serial,
         host          = "",
         vcom_port     = 0,
-        admin_port    = 0,
         run_id        = run_id,
         scenario_dir  = scenario_dir,
         open_terminal = board_cfg.get("open_terminal", False),
@@ -2487,7 +2327,7 @@ def scenario_run():
                 try:
                     board_obj = Board(
                         serial        = serial,
-                        host          = "", vcom_port = 0, admin_port = 0,
+                        host          = "", vcom_port = 0,
                         run_id        = run_id,
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),
@@ -2577,7 +2417,7 @@ def scenario_run():
                 try:
                     board_obj = Board(
                         serial        = serial,
-                        host          = "", vcom_port = 0, admin_port = 0,
+                        host          = "", vcom_port = 0,
                         run_id        = run_id,
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),

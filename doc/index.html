@@ -475,17 +475,16 @@ web_port = 8080   <span class="c"># internal Flask port (configurable)</span></p
 
 <div class="figure">
   <img src="img/img_manual.png" alt="Manual Control page">
-  <figcaption>Figure 4 — Manual Control: board card with Cli, Reset, Pb1, and Pb0 buttons</figcaption>
+  <figcaption>Figure 4 — Manual Control: board card with Cli and Reset buttons</figcaption>
 </div>
 
 <ul>
-  <li><strong>Cli</strong> — opens a terminal window (VCOM + ADMIN tabs)</li>
-  <li><strong>Reset</strong> — immediate hardware reset of the board target</li>
-  <li><strong>Pb1 / Pb0</strong> — simulates push button press and release</li>
+  <li><strong>Cli</strong> — opens a terminal window (VCOM)</li>
+  <li><strong>Reset</strong> — MCU reset of the board target (via pycommander)</li>
   <li><strong>Only my desk</strong> — source filter showing USB-only adapters</li>
 </ul>
 
-<p>The terminal window shows two tabs: <strong>VCOM</strong> for CLI commands and <strong>ADMIN</strong> for the J-Link admin interface. Hardware control buttons (Reset, PB0, PB1) are also available at the bottom of the terminal.</p>
+<p>The terminal window shows the <strong>VCOM</strong> console for CLI commands. A <strong>Reset MCU</strong> button is available at the bottom of the terminal.</p>
 
 <h3>Display modes</h3>
 <p>The terminal supports two display modes, configurable in <code>config.ini</code> under <code>[server]</code>:</p>
@@ -588,7 +587,7 @@ web_port = 8080   <span class="c"># internal Flask port (configurable)</span></p
 <p>When a scenario runs, My Lab executes these phases in order:</p>
 <ol>
   <li><strong>Flash phase</strong> — all boards are erased and flashed in parallel</li>
-  <li><strong>Connect phase</strong> — all boards are connected (VCOM + ADMIN) in parallel</li>
+  <li><strong>Connect phase</strong> — all boards are connected (VCOM) in parallel</li>
   <li><strong>Script phase</strong> — if a global script exists, it runs and is responsible for launching board scripts; otherwise all board scripts run in parallel directly</li>
 </ol>
 
@@ -688,17 +687,14 @@ scenario.board(<span class="s">"rx"</span>).cli(<span class="s">"set_mode rx"</s
   <thead><tr><th>Method</th><th>Description</th></tr></thead>
   <tbody>
     <tr><td>board.config_vcom(line_ending, echo, prompt)</td><td>Configure VCOM parameters before use</td></tr>
-    <tr><td>board.config_admin(line_ending, echo, prompt)</td><td>Configure Admin parameters before use</td></tr>
     <tr><td>board.cli(cmd, timeout=10.0)</td><td>Send CLI command; returns cleaned response (echo + prompt stripped)</td></tr>
-    <tr><td>board.admin(cmd, timeout=10.0)</td><td>Send Admin command; returns response string</td></tr>
-    <tr><td>board.reset()</td><td>Hardware reset via Admin; waits 1s for boot</td></tr>
-    <tr><td>board.flash(firmware_path, serial=None, ip=None, masserase=True, halt_reset=False)</td><td>Flash a .hex/.s37 firmware file using Simplicity Commander. Connection is auto-detected from board.host (USB if localhost, JLink IP otherwise). Override with <code>serial=</code> for <code>-s</code> or <code>ip=</code> for <code>--ip</code>. Returns True on success.</td></tr>
-    <tr><td>board.button(pb, duration=0.1)</td><td>Press push button pb (0 or 1) for given duration</td></tr>
+    <tr><td>board.reset(settle=1.0)</td><td>MCU reset via pycommander (device.reset), Commander-CLI fallback; waits <code>settle</code> seconds for boot</td></tr>
+    <tr><td>board.flash(firmware_path, serial=None, ip=None, masserase=True, halt_reset=False)</td><td>Flash a .hex/.s37 firmware file using Simplicity Commander. Connection is auto-detected from board.host (USB if localhost, JLink IP otherwise). Override with <code>serial=</code> for <code>-s</code> or <code>ip=</code> for <code>--ip</code>. With <code>masserase=True</code> a <code>device masserase</code> is run first (this is how erase is done from a script). Returns True on success.</td></tr>
     <tr><td>board.delay(seconds)</td><td>Sleep for given duration</td></tr>
     <tr><td>board.print(msg)</td><td>Emit message to Run panel as [board:nickname]</td></tr>
     <tr><td>board.checkpoint(name)</td><td>Signal named sync point to the global script (non-blocking)</td></tr>
     <tr><td>board.serial</td><td>Serial number string (read-only)</td></tr>
-    <tr><td>board.nickname</td><td>Nickname from YAML or SDM (read-only)</td></tr>
+    <tr><td>board.nickname</td><td>Nickname from YAML or adapter (read-only)</td></tr>
   </tbody>
 </table>
 
@@ -735,11 +731,7 @@ board.flash(<span class="s">"/path/to/firmware.hex"</span>, halt_reset=<span cla
 
     <span class="c"># --- Transmit via CLI ---</span>
     board.print(<span class="s">"--- send 1 packet using CLI ---"</span>)
-    board.cli(<span class="s">"tx 1"</span>)
-
-    <span class="c"># --- Transmit via button press ---</span>
-    board.print(<span class="s">"--- send 1 packet using button ---"</span>)
-    board.button(0, 0.3)</pre></div>
+    board.cli(<span class="s">"tx 1"</span>)</pre></div>
 
 <h3>Working with Responses</h3>
 <p>Board scripts are standard Python — the full Python standard library is available. Board CLI responses use the format <code>{{key:value}}</code> and can be processed with any Python technique:</p>

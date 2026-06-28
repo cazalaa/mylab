@@ -166,14 +166,6 @@ function renderTestCards(adapters) {
     });
 }
 
-async function sendAdminCommand(serial, cmd) {
-    await fetch(`/api/adapter/${serial}/admin-cmd`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cmd })
-    });
-}
-
 async function onCli(btn) {
     const serial = btn.dataset.serial;
     if (window.pywebview) {
@@ -182,17 +174,12 @@ async function onCli(btn) {
         // fallback navigateur classique
         window.open(`/terminal/${serial}`, `terminal_${serial}`, "width=820,height=520");
     }
-    await new Promise(r => setTimeout(r, 1000));
     const label  = btn.innerText;
-    btn.innerText = "…";
-    btn.disabled  = true;
-    await sendAdminCommand(serial, "target button enable");
     btn.innerText = "✓";
     btn.classList.add("success");
     setTimeout(() => {
         btn.classList.remove("success");
         btn.innerText = label;
-        btn.disabled  = false;
     }, 2000);
 }
 

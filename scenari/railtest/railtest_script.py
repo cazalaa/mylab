@@ -13,7 +13,6 @@ from random import randint
 
 def script(board):
     board.config_vcom(line_ending="CRLF", echo=True, prompt=">")
-    board.config_admin(line_ending="CRLF", echo=False, prompt=">")
 
     board.reset()
     board.delay(1.5)  # wait for board to fully boot
@@ -21,5 +20,3 @@ def script(board):
     response = board.cli("tx 1")
     board.print(f"tx 1 response: {response.split(">")[0].strip()}")
     #board.cli("help")
-    board.admin("boardid")
-    board.button(0, 0.3)

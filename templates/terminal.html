@@ -527,17 +527,11 @@ body {
     <div class="term-tab active" id="tabVcom"  onclick="switchTab('vcom')">
         <span class="term-tab-status connecting" id="statusVcom"></span>VCOM
     </div>
-    <div class="term-tab" id="tabAdmin" onclick="switchTab('admin')" style="display:none">
-        <span class="term-tab-status connecting" id="statusAdmin"></span>ADMIN
-    </div>
-
 </div>
 
 <div class="term-panes">
     <div class="term-pane active" id="paneVcom"></div>
-    <div class="term-pane"        id="paneAdmin"></div>
     <div class="term-modern"      id="modernVcom"></div>
-    <div class="term-modern"      id="modernAdmin"></div>
 </div>
 
 <div class="term-input-bar">
@@ -548,12 +542,6 @@ body {
 </div>
 
 <div class="term-action-bar" id="termActionBar">
-    <span class="term-admin-btns" id="termAdminBtns" style="display:none">
-        <button class="term-action-btn" onclick="termCmd('target reset 100')">Reset</button>
-        <button class="term-action-btn" onclick="termPb(1)">PB1</button>
-        <button class="term-action-btn" onclick="termPb(0)">PB0</button>
-        <div class="term-action-sep"></div>
-    </span>
     <button class="term-action-btn" id="termResetBtn" onclick="resetMcu()">⟲ Reset MCU</button>
     <button class="term-action-btn" onclick="pickScript()">📁 Script</button>
     <span class="term-script-name" id="termScriptName">no script selected</span>
@@ -673,7 +661,7 @@ async function init() {
     applyView();
 }
 
-// Endpoint resolution failed (no Silink ports). Never auto-connect TTY:
+// Endpoint resolution failed (no VCOM endpoint). Never auto-connect TTY:
 // show the reason and, for USB, a button the user can press deliberately.
 function showEndpointError(msg, ttyCandidate) {
     document.getElementById("termLabel").innerText = "Connexion indisponible";
@@ -683,8 +671,7 @@ function showEndpointError(msg, ttyCandidate) {
         '<div style="color:#e0654f;margin-bottom:12px">⚠ ' + msg + '</div>';
     if (ttyCandidate) {
         html +=
-            '<div style="margin-bottom:10px;opacity:.85">Repli série brute possible ' +
-            '(VCOM uniquement, pas d\'ADMIN) :</div>' +
+            '<div style="margin-bottom:10px;opacity:.85">Repli série brute possible :</div>' +
             '<button onclick="connectTTYFallback(\'' + ttyCandidate + '\')" ' +
             'style="padding:7px 16px;border:0;border-radius:6px;background:#1D9E75;' +
             'color:#fff;cursor:pointer;font:13px monospace">' +
@@ -700,7 +687,6 @@ function showEndpointError(msg, ttyCandidate) {
 function connectTTYFallback(tty) {
     document.getElementById("paneVcom").innerHTML = "";
     document.getElementById("termHost").innerText = `TTY (secours) : ${tty}`;
-    document.getElementById("tabAdmin").style.display = "none";
     createTerminalTTY("vcom", "paneVcom", tty);
     applyView();
 }
@@ -763,8 +749,6 @@ function createTerminal(kind, paneId, host, port) {
         socket.once("connect", () => socket.emit("connect_telnet", { room, host, port: String(port) }));
     }
 
-    // For admin (no board echo): accumulate keystrokes and inject > cmd into Modern View on Enter
-    var adminInputBuf = "";
     term.onData(data => {
         const out = data.replace(/\r/g, "\r\n");
         socket.emit("terminal_input", { room, data: out });
@@ -810,38 +794,11 @@ socket.on("terminal_closed", ({ room }) => {
     terminals[kind]?.term.writeln("\x1b[31m\r\nConnection closed.\x1b[0m");
     setStatus(kind, "error");
     mvAddStatus(kind, "Connection closed");
-
-    // Auto-reconnect admin channel
-    if (kind === "admin") {
-        const t = terminals["admin"];
-        if (t && t.host && t.port) {
-            const tryReconnect = () => {
-                if (terminals["admin"]?.reconnecting !== true) return;
-                t.term.writeln(`\x1b[33mReconnecting…\x1b[0m`);
-                setStatus("admin", "connecting");
-                socket.emit("connect_telnet", { room, host: t.host, port: String(t.port) });
-            };
-            terminals["admin"].reconnecting = true;
-            setTimeout(tryReconnect, 2000);
-        }
-    }
 });
 
 socket.on("terminal_error", ({ message }) => {
     terminals[activeTab]?.term.writeln(`\x1b[31mError: ${message}\x1b[0m`);
     setStatus(activeTab, "error");
-    // Retry admin reconnect if in progress
-    if (activeTab === "admin" || terminals["admin"]?.reconnecting) {
-        const t = terminals["admin"];
-        if (t && t.host && t.port && t.reconnecting) {
-            setTimeout(() => {
-                if (!t.reconnecting) return;
-                t.term.writeln(`\x1b[33mReconnecting…\x1b[0m`);
-                setStatus("admin", "connecting");
-                socket.emit("connect_telnet", { room: `${serial}_admin`, host: t.host, port: String(t.port) });
-            }, 3000);
-        }
-    }
 });
 
 // ── tabs ──────────────────────────────────────────
@@ -866,37 +823,6 @@ function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function setStatus(kind, state) {
     const el = document.getElementById(`status${cap(kind)}`);
     if (el) el.className = `term-tab-status ${state}`;
-
-    // Show action bar when admin is connected, then refit all terminals
-    if (kind === "admin") {
-        const btns = document.getElementById("termAdminBtns");
-        if (btns) {
-            btns.style.display = state === "connected" ? "contents" : "none";
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    Object.values(terminals).forEach(({ term, pane }) => fitTerm(term, pane));
-                });
-            });
-        }
-    }
-}
-
-async function termCmd(cmd) {
-    const room = `${serial}_admin`;
-    terminals["admin"]?.term.writeln(`\x1b[38;5;244m${cmd}\x1b[0m`);
-    socket.emit("terminal_input", { room, data: cmd + "\r\n" });
-    mvFeed("admin", `> ${cmd}\n`);
-}
-
-async function termPb(pb) {
-    const btns = document.querySelectorAll(".term-action-btn");
-    btns.forEach(b => b.disabled = true);
-
-    await termCmd(`target button press ${pb}`);
-    await new Promise(r => setTimeout(r, 100));
-    await termCmd(`target button release ${pb}`);
-
-    btns.forEach(b => b.disabled = false);
 }
 
 // MCU reset via Commander (pycommander) — independent of the admin console,
@@ -1143,8 +1069,7 @@ function renderBlock(kind, block) {
 
 socket.on("terminal_block", (block) => {
     if (!modernMode) return;
-    const kind = (block.room || "").endsWith("_admin") ? "admin" : "vcom";
-    renderBlock(kind, block);
+    renderBlock("vcom", block);
 });
 {% endraw %}
 </script>
