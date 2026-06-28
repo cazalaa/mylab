@@ -131,25 +131,23 @@ function renderTestCards(adapters) {
 
     adapters.forEach(a => {
         const isIP       = a.connectivityType !== "usb";
-        const isTTY      = a.ttyMode === true;  // ← TTY mode = empty connections
-        const typeLabel  = isIP && a.host ? a.host : (a.connectivityType || "?");
+        const typeLabel  = isIP && a.host ? a.host : "USB";
         const typeClass  = isIP ? "pill-ip" : "pill-usb";
-        const boardLabel = a.boardLabel || "";
-        const descLabel  = a.label      || "";
+        const nick       = a.nickname || "";
+        const model      = a.boardLabel || a.label || "";          // kit name
+        const partNo     = (a.boardId && a.boardId !== "Unknown") ? a.boardId : "";
+        const modelLine  = [model, partNo].filter(Boolean).join("  ·  ");
 
         const card = document.createElement("div");
         card.className = "test-card";
         card.innerHTML = `
             <div class="test-card-header">
                 <div class="test-card-top">
-                    <div class="board-serial-line">
-                        <span class="board-serial">${a.serialNumber}</span>
-                        ${a.nickname ? `<span class="board-nickname"> — ${a.nickname}</span>` : ""}
-                    </div>
+                    <span class="board-serial">${a.serialNumber}</span>
                     <span class="pill ${typeClass}">${typeLabel}</span>
                 </div>
-                ${boardLabel ? `<div class="board-label">${boardLabel}</div>` : ""}
-                ${descLabel  ? `<div class="board-desc">${descLabel}</div>`   : ""}
+                <div class="board-nickname">${nick}</div>
+                <div class="board-model">${modelLine}</div>
             </div>
             <div class="test-card-buttons">
                 <div class="test-btn-row">
