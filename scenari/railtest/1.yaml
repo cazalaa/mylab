@@ -1,0 +1,14 @@
+boards:
+  - board: EK2703A Rev. A02
+    connection: '440277196'
+    script: railtest_tx_until_ack_15_4.py
+    masserase: false
+    halt_reset: false
+    open_terminal: true
+  - nickname: wstk192168181
+    board: Unknown
+    connection: 192.168.1.195
+    script: railtest_rx_scan_ack_15_4.py
+    masserase: false
+    halt_reset: false
+    open_terminal: true

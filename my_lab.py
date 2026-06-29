@@ -1810,6 +1810,36 @@ class Board:
             lines.pop()
         return "\n".join(lines)
 
+    def read(self, timeout=1.0, pattern=None):
+        """Passively capture spontaneous VCOM output (e.g. RAILtest async events
+        such as received-packet lines) for up to `timeout` seconds, WITHOUT
+        sending any command. If `pattern` (a regex string) is given, returns as
+        soon as it appears. Returns the captured text.
+
+        Uses the same listener mechanism as cli(), so it never reads the socket
+        directly (the single channel reader stays the sole reader)."""
+        if not self._vcom_sock:
+            return ""
+        import re as _re
+        pat    = _re.compile(pattern) if pattern else None
+        latest = [""]
+        event  = threading.Event()
+
+        def on_data(combined):
+            latest[0] = combined
+            if pat and pat.search(combined):
+                event.set()
+
+        self._vcom_listeners.append(on_data)
+        try:
+            event.wait(timeout=timeout)
+        finally:
+            try:
+                self._vcom_listeners.remove(on_data)
+            except ValueError:
+                pass
+        return latest[0]
+
     def reset(self, settle=1.0):
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[RST] {self.nickname or self.serial} {ts}")

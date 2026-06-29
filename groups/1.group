@@ -1,0 +1,18 @@
+{
+  "name": "1",
+  "adapters": [
+    {
+      "serialNumber": "440277196",
+      "connectivityType": "usb",
+      "boardId": "EK2703A Rev. A02",
+      "boardLabel": "xG24 Explorer Kit"
+    },
+    {
+      "serialNumber": "440065813",
+      "connectivityType": "ip",
+      "host": "192.168.1.195",
+      "nickname": "wstk192168181",
+      "boardId": "Unknown"
+    }
+  ]
+}
