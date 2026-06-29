@@ -3,6 +3,7 @@
 <!-- header source : centré sur une ligne -->
 <div class="test-source-bar">
     <button id="testSourceBtn" onclick="toggleSourcePanel()">All available</button>
+    <button id="testRefreshBtn" class="test-refresh-btn" title="Re-scan adapters" onclick="refreshAdapters()">⟳</button>
 </div>
 
 <!-- liste des cartes -->
@@ -24,9 +25,36 @@
 let testAdapters = [];
 let testSource   = "available";
 
-function onPageLoad() {
+async function onPageLoad() {
+    // Show whatever we already have instantly, then refresh to the latest
+    // discovery in the background (keeps Manual Control in sync with Maintenance
+    // instead of showing the stale app-start snapshot).
+    renderFromSource(testSource);
+    await loadAdapters();
+}
+
+// Re-enumerate adapters and refresh the shared cache, then render.
+// deep=true also forces a re-probe (board labels) via /scan, like Maintenance.
+async function loadAdapters(deep = false) {
+    const btn = document.getElementById("testRefreshBtn");
+    if (btn) { btn.classList.add("spinning"); btn.disabled = true; }
+    try {
+        if (deep) {
+            await fetch("/scan", { method: "POST" });
+            await new Promise(r => setTimeout(r, 1200));
+        }
+        const res   = await fetch("/adapters");
+        const fresh  = await res.json();
+        if (window.appState) window.appState.cache = fresh;
+    } catch (e) {
+        console.error("loadAdapters failed:", e);
+    } finally {
+        if (btn) { btn.classList.remove("spinning"); btn.disabled = false; }
+    }
     renderFromSource(testSource);
 }
+
+function refreshAdapters() { return loadAdapters(true); }
 
 // ── source panel ──────────────────────────────────
 function closeSourcePanel() {
