@@ -1,6 +1,9 @@
+--extra-index-url https://test.pypi.org/simple/
+
 flask
 flask-socketio
 pywebview
 pyserial
 requests
 pyyaml
+silabs-pycommander==0.1.15
