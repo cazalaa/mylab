@@ -1,0 +1,8 @@
+script: plot_demo_global.py
+boards:
+  - nickname: demo
+    board: 4163A
+    connection: 
+    masserase: false
+    halt_reset: false
+    open_terminal: true

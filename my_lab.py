@@ -1668,6 +1668,46 @@ def _t_settimeout(t, timeout):
         t.settimeout(timeout)
 
 
+# ── Live plot driver (Plotly "Graphe" view of a board terminal) ──────────
+class Plot:
+    """Drives the Plotly 'Graphe' view of a board's terminal window.
+
+    All display logic lives in the scenario script; the browser only renders
+    (Plotly.react / Plotly.extendTraces). Events are emitted to the board's
+    VCOM room — the room the terminal window already joined — so a plain
+    `board.plot.*` call reaches the right window, with no per-tab wiring.
+
+    Usage (board script `script(board)` or global `scenario.board(0).plot`):
+        board.plot.show(fig)        # full figure: dict OR a plotly go.Figure
+        board.plot.extend(ys, x=..., traces=..., maxpoints=...)  # append points
+        board.plot.clear()
+
+    `fig` is a raw spec {'data': [...], 'layout': {...}, 'config': {...}}
+    (no Python dependency) or a plotly.graph_objects.Figure (auto-serialised).
+    Anything pushed must be JSON-serialisable (same rule as socketio.emit).
+    """
+
+    def __init__(self, serial):
+        self._room = f"{serial}_vcom"
+
+    def show(self, fig):
+        spec = json.loads(fig.to_json()) if hasattr(fig, "to_json") else fig
+        socketio.emit("plot_figure", spec, room=self._room)
+        socketio.sleep(0)
+
+    def extend(self, ys, x=None, traces=None, maxpoints=None):
+        if traces is None:
+            traces = list(range(len(ys)))
+        socketio.emit("plot_extend",
+                      {"ys": ys, "x": x, "traces": traces, "maxpoints": maxpoints},
+                      room=self._room)
+        socketio.sleep(0)
+
+    def clear(self):
+        socketio.emit("plot_clear", {}, room=self._room)
+        socketio.sleep(0)
+
+
 class Board:
     """
     Wraps the VCOM connection (pyserial tty for USB / TCP:4901 for IP) for one board.
@@ -1697,6 +1737,7 @@ class Board:
         self._log_path = None
         self._scenario_ctx = None  # set by Scenario when global script is used
         self.parser = get_parser(TERMINAL_PARSER)  # protocol parser (auto/railtest/generic)
+        self.plot = Plot(serial)  # live Plotly view of this board's terminal window
 
     # ── configuration ────────────────────────────────────────
     def config_vcom(self, line_ending="CRLF", echo=True, prompt=">"):

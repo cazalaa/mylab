@@ -7,6 +7,9 @@
 <link rel="stylesheet" href="/static/xterm.min.css">
 <script src="/static/xterm.min.js"></script>
 <script src="/static/socket.io.min.js"></script>
+<!-- Plotly: pinned version required (plotly-latest is frozen at v1.58.5).
+     To vendor locally, drop the file in static/ and point src there. -->
+<script src="/static/plotly-3.6.0.min.js" charset="utf-8"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -136,6 +139,28 @@ body {
 .term-modern.active { display: flex; }
 .term-modern::-webkit-scrollbar { width: 5px; }
 .term-modern::-webkit-scrollbar-thumb { background: #b5bfc6; border-radius: 3px; }
+
+/* ── graph view (Plotly, script-driven) ── */
+.term-graph {
+    flex: 1;
+    min-height: 0;
+    display: none;
+    flex-direction: column;
+    border-radius: 14px;
+    box-shadow:
+        inset -4px -4px 8px rgba(250, 251, 255, 1),
+        inset  4px  4px 8px rgba(22, 27, 29, 0.10);
+    background: #EFF2F9;
+    padding: 10px;
+    overflow: hidden;
+}
+.term-graph.active { display: flex; }
+.term-graph .graph-canvas { flex: 1; min-height: 0; }
+.term-graph .graph-empty {
+    flex: 1; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #9aa7b2; font-size: 12px;
+}
 
 /* timeline spine */
 .tm-entry {
@@ -527,11 +552,16 @@ body {
     <div class="term-tab active" id="tabVcom"  onclick="switchTab('vcom')">
         <span class="term-tab-status connecting" id="statusVcom"></span>VCOM
     </div>
+    <div class="term-tab" id="tabGraph" onclick="showGraph()">📈 Graphe</div>
 </div>
 
 <div class="term-panes">
     <div class="term-pane active" id="paneVcom"></div>
     <div class="term-modern"      id="modernVcom"></div>
+    <div class="term-graph"       id="paneGraph">
+        <div class="graph-empty" id="graphEmpty">En attente de données du script…</div>
+        <div class="graph-canvas" id="graphPlot" style="display:none"></div>
+    </div>
 </div>
 
 <div class="term-input-bar">
@@ -801,8 +831,67 @@ socket.on("terminal_error", ({ message }) => {
     setStatus(activeTab, "error");
 });
 
+// ── Plotly "Graphe" view ──────────────────────────
+// Fully script-driven: the scenario/board script sends a full figure
+// (plot_figure) and incremental points (plot_extend) via board.plot.* —
+// this side only renders. Events arrive on the board's VCOM room, already
+// joined by this window, so no extra subscription is needed.
+var graphMode   = false;
+var graphInited = false;
+var graphDiv    = null;
+
+function ensureGraphDiv() {
+    if (!graphDiv) graphDiv = document.getElementById("graphPlot");
+    return graphDiv;
+}
+function graphReveal() {
+    document.getElementById("graphEmpty").style.display = "none";
+    ensureGraphDiv().style.display = "block";
+}
+
+socket.on("plot_figure", function (spec) {
+    if (!window.Plotly) return;
+    var gd = ensureGraphDiv();
+    graphReveal();
+    Plotly.react(gd, spec.data || [], spec.layout || {},
+                 spec.config || { responsive: true, displaylogo: false });
+    graphInited = true;
+    if (graphMode) Plotly.Plots.resize(gd);
+});
+
+socket.on("plot_extend", function (d) {
+    if (!window.Plotly || !graphInited) return;   // ignore extends before a figure
+    var gd = ensureGraphDiv();
+    var update = { y: d.ys.map(function (v) { return [v]; }) };
+    if (d.x !== null && d.x !== undefined) {
+        update.x = d.traces.map(function () { return [d.x]; });
+    }
+    var max = (d.maxpoints === null || d.maxpoints === undefined) ? undefined : d.maxpoints;
+    Plotly.extendTraces(gd, update, d.traces, max);
+});
+
+socket.on("plot_clear", function () {
+    if (!window.Plotly) return;
+    Plotly.purge(ensureGraphDiv());
+    graphInited = false;
+    ensureGraphDiv().style.display = "none";
+    document.getElementById("graphEmpty").style.display = "flex";
+});
+
+function showGraph() {
+    graphMode = true;
+    document.querySelectorAll(".term-tab").forEach(function (t) { t.classList.remove("active"); });
+    document.getElementById("tabGraph").classList.add("active");
+    document.querySelectorAll(".term-pane").forEach(function (p) { p.classList.remove("active"); });
+    document.querySelectorAll(".term-modern").forEach(function (p) { p.classList.remove("active"); });
+    document.getElementById("paneGraph").classList.add("active");
+    if (window.Plotly && graphInited) Plotly.Plots.resize(ensureGraphDiv());
+}
+
 // ── tabs ──────────────────────────────────────────
 function switchTab(kind) {
+    graphMode = false;
+    document.getElementById("paneGraph").classList.remove("active");
     activeTab = kind;
     document.querySelectorAll(".term-tab").forEach(t => t.classList.remove("active"));
     document.getElementById(`tab${cap(kind)}`).classList.add("active");
@@ -900,6 +989,7 @@ async function runScript() {
 
 window.addEventListener("resize", () => {
     Object.values(terminals).forEach(({ term, pane }) => fitTerm(term, pane));
+    if (graphMode && window.Plotly && graphInited) Plotly.Plots.resize(ensureGraphDiv());
 });
 
 // ── start ─────────────────────────────────────────
@@ -921,6 +1011,7 @@ var modernMode = {{ 'true' if terminal_mode == 'modern' else 'false' }};
 // ══════════════════════════════════════════════════════════════════════
 
 function applyView() {
+    if (graphMode) return;   // graph view active — leave terminal panes hidden
     if (modernMode) {
         document.querySelectorAll(".term-pane").forEach(p => p.classList.remove("active"));
         document.querySelectorAll(".term-modern").forEach(p => p.classList.remove("active"));
