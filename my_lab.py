@@ -1695,12 +1695,29 @@ class Plot:
         socketio.emit("plot_figure", spec, room=self._room)
         socketio.sleep(0)
 
-    def extend(self, ys, x=None, traces=None, maxpoints=None):
+    def dashboard(self, spec):
+        """Show a JSON-described dashboard in the Graph tab.
+
+        The browser recognizes specs with kind == "dashboard". The dashboard may
+        contain Plotly panels and controls. Control commands are sent back through
+        the existing terminal_input socket path.
+        """
+        if hasattr(spec, "to_json"):
+            spec = json.loads(spec.to_json())
+        if isinstance(spec, dict) and "kind" not in spec:
+            spec = {**spec, "kind": "dashboard"}
+        socketio.emit("plot_figure", spec, room=self._room)
+        socketio.sleep(0)
+
+    def extend(self, ys, x=None, traces=None, maxpoints=None, target=None, window_s=None):
         if traces is None:
             traces = list(range(len(ys)))
-        socketio.emit("plot_extend",
-                      {"ys": ys, "x": x, "traces": traces, "maxpoints": maxpoints},
-                      room=self._room)
+        payload = {"ys": ys, "x": x, "traces": traces, "maxpoints": maxpoints}
+        if target is not None:
+            payload["target"] = target
+        if window_s is not None:
+            payload["window_s"] = window_s
+        socketio.emit("plot_extend", payload, room=self._room)
         socketio.sleep(0)
 
     def clear(self):

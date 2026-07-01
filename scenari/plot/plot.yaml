@@ -1,8 +1,7 @@
 script: plot_demo_global.py
 boards:
-  - nickname: demo
-    board: 4186C
-    connection: Usb
+  - board: DK2606A Rev. A01
+    connection: '440353134'
     masserase: false
     halt_reset: false
     open_terminal: true

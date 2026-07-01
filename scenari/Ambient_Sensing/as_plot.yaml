@@ -1,0 +1,7 @@
+boards:
+  - board: DK2606A Rev. A01
+    connection: '440353134'
+    script: as_plot.py
+    masserase: false
+    halt_reset: false
+    open_terminal: true
