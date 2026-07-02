@@ -10,6 +10,8 @@
             <span class="sc-panel-title" id="scRunTitle">Run</span>
             <div class="panel-spacer"></div>
             <span id="scRunStatusBadge" class="sc-run-badge"></span>
+            <button class="sc-browse-btn" id="scRunStopBtn" onclick="stopRun()"
+                    style="background:#E24B4A; color:#fff; border:0;">■ Stop</button>
             <span class="group-close" onclick="closeRunPanel()">✕</span>
         </div>
         <!-- body: left (boards) + right (log) -->
@@ -102,6 +104,9 @@ function openRunPanel(run_id) {
     if (!panel) return;
     log.innerHTML    = "";
     boards.innerHTML = "";
+    window._scRunId  = run_id;
+    const stopBtn = document.getElementById("scRunStopBtn");
+    if (stopBtn) { stopBtn.disabled = false; stopBtn.innerText = "■ Stop"; }
 
     // header
     const title = document.getElementById("scRunTitle");
@@ -200,10 +205,30 @@ function openRunPanel(run_id) {
         if (nameEl) nameEl.innerText = nickname;
     });
 
-    sc.on("run_done", ({ run_id: rid }) => {
+    sc.on("run_done", ({ run_id: rid, status }) => {
         if (rid !== run_id) return;
-        if (badge) { badge.innerText = "done"; }
+        if (badge) { badge.innerText = status || "done"; }
+        const b = document.getElementById("scRunStopBtn");
+        if (b) { b.disabled = true; }
     });
+
+    sc.on("run_stopped", () => {
+        if (badge) { badge.innerText = "stopped"; badge.className = "sc-run-badge"; }
+        const b = document.getElementById("scRunStopBtn");
+        if (b) { b.disabled = true; }
+    });
+}
+
+async function stopRun() {
+    const btn = document.getElementById("scRunStopBtn");
+    if (btn) { btn.disabled = true; btn.innerText = "Stopping…"; }
+    try {
+        await fetch("/api/scenario-stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ run_id: window._scRunId })
+        });
+    } catch (e) {}
 }
 
 function closeRunPanel() {
@@ -213,6 +238,7 @@ function closeRunPanel() {
     sc.off("run_output");
     sc.off("run_board_nickname");
     sc.off("run_done");
+    sc.off("run_stopped");
 }
 
 // ── Script Control v2 ──

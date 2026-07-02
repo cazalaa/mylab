@@ -521,13 +521,14 @@ class WindowAPI:
         """Appelé depuis le JS via pywebview.api.open_terminal(serial)"""
         def _open():
             url = f"http://127.0.0.1:{WEB_PORT}/terminal/{serial}"
-            webview.create_window(
+            win = webview.create_window(
                 f"{serial} — Terminal",
                 url,
                 width=820, height=620,
                 resizable=True,
                 js_api=TerminalWindowAPI()
             )
+            _register_terminal_close(win, serial, None)
         threading.Thread(target=_open, daemon=True).start()
 
 
@@ -579,6 +580,9 @@ def terminal_run_script():
 
     def run():
         emit_out(f"Running {os.path.basename(script_path)}", "yellow")
+        stop_event = threading.Event()
+        terminal_run_stops[serial] = stop_event
+        socketio.emit("terminal_script_started", {"serial": serial}, room=room)
         try:
             with open(script_path) as f:
                 code = f.read()
@@ -586,7 +590,7 @@ def terminal_run_script():
             # connect() reuses the terminal's open channel if present, else opens
             # fresh via pycommander (USB tty / IP TCP). Single source of truth.
             board_obj = Board(serial=serial, host="", vcom_port=0,
-                              run_id=None, scenario_dir="")
+                              run_id=None, scenario_dir="", stop=stop_event)
             try:
                 board_obj.connect()
             except EndpointError as e:
@@ -607,13 +611,32 @@ def terminal_run_script():
                 namespace["script"](board_obj)
             board_obj.sync()   # let the last command's output + prompt arrive first
             emit_out("Script completed", "green")
+        except RunAborted:
+            emit_out("Script stopped", "yellow")
         except Exception as e:
             import traceback
             emit_out(f"✗ {e}", "red")
             emit_out(traceback.format_exc(), "red")
+        finally:
+            if terminal_run_stops.get(serial) is stop_event:
+                terminal_run_stops.pop(serial, None)
+            socketio.emit("terminal_script_done", {"serial": serial}, room=room)
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify({"ok": True})
+
+
+@app.route("/api/terminal-stop-script", methods=["POST"])
+def terminal_stop_script():
+    """Stop the script currently running in a terminal window, without closing
+    the window or the VCOM channel. Cooperative — the script aborts at its next
+    board/plot/delay call."""
+    serial = (request.json or {}).get("serial", "")
+    ev = terminal_run_stops.get(serial)
+    if ev is not None:
+        ev.set()
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "no running script"})
 
 
 
@@ -983,6 +1006,49 @@ def handle_terminal_input(data):
             _tin_log(serial_id, "VCOM", cmd)
     except Exception as e:
         emit("terminal_error", {"message": str(e)})
+
+
+# ── Terminal window presence (reliable close detection) ──────────────────────
+# A terminal window identifies itself on connect (terminal_hello). When its
+# socket drops — which on loopback only happens when the window actually closes —
+# we clean up after a short grace period, unless it reconnected. This is the
+# primary trigger; the pywebview 'closed' hook and the beforeunload beacon are
+# backups. All three funnel into the idempotent _cleanup_terminal.
+terminal_clients = {}   # sid    -> {"serial": str, "run_id": str|None}
+terminal_live    = {}   # serial -> set of live sids
+
+
+@socketio.on("terminal_hello")
+def handle_terminal_hello(data):
+    serial = (data or {}).get("serial")
+    if not serial:
+        return
+    run_id = (data or {}).get("run_id") or None
+    terminal_clients[request.sid] = {"serial": serial, "run_id": run_id}
+    terminal_live.setdefault(serial, set()).add(request.sid)
+    print(f"[TERM] hello sid={request.sid} serial={serial} run_id={run_id}")
+
+
+@socketio.on("disconnect")
+def handle_socket_disconnect(*args):
+    info = terminal_clients.pop(request.sid, None)
+    if not info:
+        return  # not a terminal window (main UI / script control) — ignore
+    serial = info["serial"]
+    run_id = info["run_id"]
+    live = terminal_live.get(serial)
+    if live is not None:
+        live.discard(request.sid)
+    print(f"[TERM] disconnect sid={request.sid} serial={serial}")
+
+    def _maybe_cleanup():
+        socketio.sleep(2.0)                 # grace: cancel if it reconnects
+        if terminal_live.get(serial):       # a live sid remains → reconnected
+            return
+        terminal_live.pop(serial, None)
+        _cleanup_terminal(serial, run_id)
+
+    socketio.start_background_task(_maybe_cleanup)
 
 
 @app.route("/api/jslog", methods=["POST"])
@@ -1397,12 +1463,13 @@ class Scenario:
     direct board access and checkpoint-based synchronisation.
     """
 
-    def __init__(self, boards, board_cfgs, scenario_dir, run_id):
+    def __init__(self, boards, board_cfgs, scenario_dir, run_id, stop=None):
         self._boards      = boards          # list[Board] in YAML order
         self._board_cfgs  = board_cfgs      # list[dict] — raw YAML board entries
         self._scenario_dir = scenario_dir
         self._run_id      = run_id
         self._run_room    = f"run_{run_id}"
+        self._stop        = stop if stop is not None else threading.Event()
 
         # Checkpoint synchronisation
         # name -> {serials_expected: set, events: {serial: Event}}
@@ -1584,7 +1651,7 @@ class Scenario:
 
     def delay(self, seconds):
         self.print(f"[scenario] delay {seconds}s")
-        time.sleep(seconds)
+        _abort_sleep(self._stop, seconds)
 
     def print(self, msg):
         run_room = self._run_room
@@ -1623,6 +1690,11 @@ def _exec_board_script(board, script_code, run_id):
         if "script" in namespace and callable(namespace["script"]):
             namespace["script"](board)
         emit_status("done")
+    except RunAborted:
+        socketio.emit("run_output",
+                      {"serial": serial, "data": "[stopped]\n", "stream": "script"},
+                      room=run_room)
+        emit_status("stopped")
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
@@ -1637,7 +1709,116 @@ def _exec_board_script(board, script_code, run_id):
 # Board class + Run pipeline
 # ============================================================
 
-active_runs = {}  # run_id -> {status, boards: {serial: status}}
+active_runs = {}  # run_id -> {status, boards: {serial: status}, stop: Event}
+
+# ── Cancellation + window lifecycle ──────────────────────────
+# Scripts can't be force-killed mid-exec, so stopping is cooperative: a per-run
+# (or per-terminal) threading.Event is checked by the blocking board/plot calls,
+# which raise RunAborted to unwind the script thread cleanly.
+class RunAborted(Exception):
+    """Raised inside a board/global script when a stop was requested."""
+
+
+terminal_windows   = {}  # run_id -> [webview.Window]  (terminals opened by a run)
+terminal_run_stops = {}  # serial -> threading.Event   (stop flag for a terminal-run script)
+
+
+def _abort_sleep(stop, seconds, step=0.05):
+    """Sleep in small steps, raising RunAborted as soon as `stop` is set.
+    Replaces time.sleep() everywhere a running script might need to be stopped."""
+    end = time.time() + max(0.0, seconds)
+    while True:
+        if stop is not None and stop.is_set():
+            raise RunAborted("stopped")
+        remaining = end - time.time()
+        if remaining <= 0:
+            return
+        time.sleep(min(step, remaining))
+
+
+def _reset_channels_and_caches():
+    """Close every open VCOM channel and wipe all per-room/session caches, so the
+    server is back to the state it has right after startup (no board attached)."""
+    for room in list(active_telnets.keys()):
+        try:
+            close_channel(room)   # closes transport, stops reader, emits terminal_closed
+        except Exception:
+            pass
+    active_telnets.clear()
+    active_boards.clear()
+    _channel_open.clear()
+    _room_parsers.clear()
+    _input_buf.clear()
+    terminal_run_stops.clear()
+
+
+def _cleanup_terminal(serial, run_id=None):
+    """Called when a terminal window is closed: stop its script, close its VCOM
+    channel, and drop the caches tied to that board's last execution (comm state,
+    session log, input buffer). The graph lives in the closed window, so it goes
+    with it; a fresh terminal for the same board starts clean.
+
+    If the terminal belongs to a scenario run, closing it stops that run (its
+    board scripts + global script all share the run's stop event)."""
+    room = f"{serial}_vcom"
+    print(f"[TERM] cleanup {serial} (run_id={run_id})")
+
+    # Resolve the owning run if the caller didn't pass it (e.g. beacon path).
+    if run_id is None:
+        for rid, wins in terminal_windows.items():
+            if any(getattr(w, "_mylab_serial", None) == serial for w in wins):
+                run_id = rid
+                break
+
+    # 1) Stop the scenario run this terminal belongs to (cooperative).
+    if run_id and run_id in active_runs:
+        ev = active_runs[run_id].get("stop")
+        if ev is not None:
+            ev.set()
+            print(f"[TERM] armed run stop for {run_id}")
+
+    # 2) Stop a terminal-run script (Run button) on this board, if any.
+    ev = terminal_run_stops.pop(serial, None)
+    if ev is not None:
+        ev.set()
+
+    # 3) Close the channel + drop per-board caches.
+    try:
+        close_channel(room)
+    except Exception:
+        pass
+    _room_parsers.pop(room, None)
+    _room_parsers.pop(f"{serial}_session_log", None)
+    for k in [k for k in list(_input_buf.keys()) if k.startswith(room + "_")]:
+        _input_buf.pop(k, None)
+    if run_id and run_id in terminal_windows:
+        # best-effort: forget this window so a later Stop doesn't touch a dead handle
+        terminal_windows[run_id] = [w for w in terminal_windows[run_id]
+                                    if getattr(w, "_mylab_serial", None) != serial]
+
+
+def _register_terminal_close(win, serial, run_id=None):
+    """Subscribe to the pywebview window 'closed' event to run cleanup. The events
+    API name has varied across pywebview versions, so try both `win.events.closed`
+    and `win.closed`; a POST /api/terminal-closing beacon from the page is the
+    backup path. Returns True if a handler was attached."""
+    try:
+        win._mylab_serial = serial
+    except Exception:
+        pass
+    def _on_closed():
+        _cleanup_terminal(serial, run_id)
+    for attach in (lambda: win.events.closed.__iadd__(_on_closed),
+                   lambda: win.closed.__iadd__(_on_closed)):
+        try:
+            attach()
+            print(f"[TERM] close hook attached for {serial}")
+            return True
+        except Exception:
+            continue
+    print(f"[TERM] WARNING: could not attach close hook for {serial} "
+          f"(relying on beforeunload beacon)")
+    return False
 
 # ── VCOM line ending helper ──────────────────────────────────
 LINE_ENDINGS = {"CR": b"\r", "LF": b"\n", "CRLF": b"\r\n"}
@@ -1687,37 +1868,27 @@ class Plot:
     Anything pushed must be JSON-serialisable (same rule as socketio.emit).
     """
 
-    def __init__(self, serial):
+    def __init__(self, serial, stop=None):
         self._room = f"{serial}_vcom"
+        self._stop = stop
+
+    def _ck(self):
+        if self._stop is not None and self._stop.is_set():
+            raise RunAborted("stopped")
 
     def show(self, fig):
+        self._ck()
         spec = json.loads(fig.to_json()) if hasattr(fig, "to_json") else fig
         socketio.emit("plot_figure", spec, room=self._room)
         socketio.sleep(0)
 
-    def dashboard(self, spec):
-        """Show a JSON-described dashboard in the Graph tab.
-
-        The browser recognizes specs with kind == "dashboard". The dashboard may
-        contain Plotly panels and controls. Control commands are sent back through
-        the existing terminal_input socket path.
-        """
-        if hasattr(spec, "to_json"):
-            spec = json.loads(spec.to_json())
-        if isinstance(spec, dict) and "kind" not in spec:
-            spec = {**spec, "kind": "dashboard"}
-        socketio.emit("plot_figure", spec, room=self._room)
-        socketio.sleep(0)
-
-    def extend(self, ys, x=None, traces=None, maxpoints=None, target=None, window_s=None):
+    def extend(self, ys, x=None, traces=None, maxpoints=None):
+        self._ck()
         if traces is None:
             traces = list(range(len(ys)))
-        payload = {"ys": ys, "x": x, "traces": traces, "maxpoints": maxpoints}
-        if target is not None:
-            payload["target"] = target
-        if window_s is not None:
-            payload["window_s"] = window_s
-        socketio.emit("plot_extend", payload, room=self._room)
+        socketio.emit("plot_extend",
+                      {"ys": ys, "x": x, "traces": traces, "maxpoints": maxpoints},
+                      room=self._room)
         socketio.sleep(0)
 
     def clear(self):
@@ -1732,7 +1903,8 @@ class Board:
     """
 
     def __init__(self, serial, host, vcom_port,
-                 run_id, scenario_dir, open_terminal=False, nickname=None):
+                 run_id, scenario_dir, open_terminal=False, nickname=None,
+                 stop=None):
         self.serial        = serial
         self.nickname      = nickname  # scenario nickname (overrides adapter nickname)
         self.host          = host
@@ -1754,7 +1926,12 @@ class Board:
         self._log_path = None
         self._scenario_ctx = None  # set by Scenario when global script is used
         self.parser = get_parser(TERMINAL_PARSER)  # protocol parser (auto/railtest/generic)
-        self.plot = Plot(serial)  # live Plotly view of this board's terminal window
+        self._stop = stop if stop is not None else threading.Event()  # cooperative cancel
+        self.plot = Plot(serial, self._stop)  # live Plotly view of this board's terminal window
+
+    def _ck(self):
+        if self._stop.is_set():
+            raise RunAborted("stopped")
 
     # ── configuration ────────────────────────────────────────
     def config_vcom(self, line_ending="CRLF", echo=True, prompt=">"):
@@ -1788,13 +1965,16 @@ class Board:
 
         if self.open_terminal_flag:
             def _open():
-                url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}?from_run=1"
-                webview.create_window(
+                url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}?from_run=1&run_id={self.run_id}"
+                win = webview.create_window(
                     f"{self.serial} — Terminal", url,
                     width=820, height=620, resizable=True)
+                terminal_windows.setdefault(self.run_id, []).append(win)
+                _register_terminal_close(win, self.serial, self.run_id)
             threading.Thread(target=_open, daemon=True).start()
 
     def write_cli(self, data):
+        self._ck()
         if self._vcom_sock:
             if isinstance(data, str):
                 data = data.encode("utf-8")
@@ -1826,6 +2006,7 @@ class Board:
         return data.decode("utf-8", errors="replace")
 
     def cli(self, cmd, timeout=10.0):
+        self._ck()
         if not self._vcom_sock:
             return ""
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -1876,6 +2057,7 @@ class Board:
 
         Uses the same listener mechanism as cli(), so it never reads the socket
         directly (the single channel reader stays the sole reader)."""
+        self._ck()
         if not self._vcom_sock:
             return ""
         import re as _re
@@ -2029,7 +2211,7 @@ class Board:
     def delay(self, seconds):
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[DLY] {self.nickname or self.serial} {ts} {seconds}s")
-        time.sleep(seconds)
+        _abort_sleep(self._stop, seconds)
 
     def wait_vcom_ready(self, timeout=5.0, settle=0.2):
         """Ensure the VCOM transport is open AND the channel has settled before
@@ -2219,6 +2401,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
         scenario_dir  = scenario_dir,
         open_terminal = board_cfg.get("open_terminal", False),
         nickname      = board_cfg.get("_nickname"),
+        stop          = active_runs.get(run_id, {}).get("stop"),
     )
     board._log_path = log_path
     try:
@@ -2360,7 +2543,8 @@ def scenario_run():
     active_runs[run_id] = {
         "status":   "running",
         "scenario": path,
-        "boards":   {bc["_resolved_serial"]: "pending" for bc in resolved_boards}
+        "boards":   {bc["_resolved_serial"]: "pending" for bc in resolved_boards},
+        "stop":     threading.Event(),
     }
 
     def run_all():
@@ -2420,6 +2604,7 @@ def scenario_run():
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),
                         nickname      = bc.get("_nickname"),
+                        stop          = active_runs[run_id]["stop"],
                     )
                     board_obj._log_path = get_log_file(serial)
                     board_obj.connect()
@@ -2435,7 +2620,8 @@ def scenario_run():
                                   room=run_room)
 
             # Run global script
-            scenario_obj = Scenario(board_objs, resolved_boards, scenario_dir, run_id)
+            scenario_obj = Scenario(board_objs, resolved_boards, scenario_dir, run_id,
+                                    stop=active_runs[run_id]["stop"])
             run_room = f"run_{run_id}"
             try:
                 namespace = {
@@ -2446,6 +2632,10 @@ def scenario_run():
                 exec(global_script_code, namespace)
                 if "script" in namespace and callable(namespace["script"]):
                     namespace["script"](scenario_obj)
+            except RunAborted:
+                socketio.emit("run_output",
+                              {"serial": "_scenario_", "data": "[stopped]\n", "stream": "script"},
+                              room=run_room)
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
@@ -2510,6 +2700,7 @@ def scenario_run():
                         scenario_dir  = scenario_dir,
                         open_terminal = bc.get("open_terminal", False),
                         nickname      = bc.get("_nickname"),
+                        stop          = active_runs[run_id]["stop"],
                     )
                     board_obj._log_path = get_log_file(serial)
                     board_obj.connect()
@@ -2545,11 +2736,68 @@ def scenario_run():
                         try: fut.result()
                         except: pass
 
-        active_runs[run_id]["status"] = "done"
-        socketio.emit("run_done", {"run_id": run_id}, room=f"run_{run_id}")
+        run = active_runs.get(run_id)
+        if run is not None:
+            stopped = run.get("stop")
+            run["status"] = "stopped" if (stopped is not None and stopped.is_set()) else "done"
+            socketio.emit("run_done",
+                          {"run_id": run_id, "status": run["status"]},
+                          room=f"run_{run_id}")
 
     threading.Thread(target=run_all, daemon=True).start()
     return jsonify({"ok": True, "run_id": run_id})
+
+
+@app.route("/api/scenario-stop", methods=["POST"])
+def scenario_stop():
+    """Stop everything and return to a just-opened state: signal all running
+    scripts to abort, close every terminal window a run opened, close all VCOM
+    channels, and wipe caches. Cooperative — a script stops at its next board/
+    plot/delay call (near-instant in practice)."""
+    run_id = (request.json or {}).get("run_id")
+
+    # 1) Signal cooperative stop to every run and terminal-run script.
+    for run in list(active_runs.values()):
+        ev = run.get("stop")
+        if ev is not None:
+            ev.set()
+    for ev in list(terminal_run_stops.values()):
+        ev.set()
+
+    # 2) Close all terminal windows opened by runs.
+    for wins in list(terminal_windows.values()):
+        for w in wins:
+            try:
+                w.destroy()
+            except Exception:
+                pass
+    terminal_windows.clear()
+
+    # 3) Close channels + wipe caches (as if the app had just opened).
+    _reset_channels_and_caches()
+
+    # 4) Mark runs stopped (metadata is inert; new runs use fresh ids) and
+    #    notify the UI. active_runs is intentionally NOT cleared here to avoid a
+    #    race with run threads still unwinding (their emit_status would KeyError).
+    for run in active_runs.values():
+        run["status"] = "stopped"
+    socketio.emit("run_stopped", {"run_id": run_id})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/terminal-closing", methods=["POST"])
+def terminal_closing():
+    """Backup path for terminal-window cleanup (sendBeacon on page unload), in
+    case the pywebview 'closed' event isn't delivered. Idempotent."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    serial = data.get("serial", "")
+    run_id = data.get("run_id") or None
+    if serial:
+        _cleanup_terminal(serial, run_id)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/run-status/<run_id>")

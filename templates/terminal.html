@@ -9,7 +9,7 @@
 <script src="/static/socket.io.min.js"></script>
 <!-- Plotly: pinned version required (plotly-latest is frozen at v1.58.5).
      To vendor locally, drop the file in static/ and point src there. -->
-<script src="/static/plotly-3.6.0.min.js" charset="utf-8"></script>
+<script src="https://cdn.plot.ly/plotly-3.6.0.min.js" charset="utf-8"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -160,85 +160,6 @@ body {
     flex: 1; min-height: 0;
     display: flex; align-items: center; justify-content: center;
     color: #9aa7b2; font-size: 12px;
-}
-
-/* JSON dashboard view (script-driven controls + one or more Plotly panels) */
-.graph-dashboard {
-    flex: 1;
-    min-height: 0;
-    display: none;
-    flex-direction: column;
-    gap: 10px;
-    overflow: hidden;
-}
-.graph-dashboard-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: #4a5a68;
-    flex-shrink: 0;
-}
-.graph-dashboard-row {
-    display: flex;
-    gap: 10px;
-    min-height: 0;
-}
-.graph-card {
-    background: #EFF2F9;
-    border-radius: 12px;
-    padding: 10px;
-    box-shadow:
-        -3px -3px 6px rgba(250,251,255,1),
-         3px  3px 6px rgba(22,27,29,0.12);
-    min-width: 0;
-}
-.graph-card-title {
-    font-size: 12px;
-    font-weight: 500;
-    color: #4a5a68;
-    margin-bottom: 8px;
-}
-.graph-control-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-}
-.graph-control {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: #4a5a68;
-}
-.graph-control input,
-.graph-control select,
-.graph-control button {
-    font-family: 'IBM Plex Sans', sans-serif;
-    font-size: 12px;
-}
-.graph-control input[type="number"] {
-    width: 82px;
-}
-.graph-control button {
-    border: none;
-    border-radius: 8px;
-    padding: 6px 10px;
-    background: #EFF2F9;
-    color: #4a5a68;
-    cursor: pointer;
-    box-shadow:
-        -2px -2px 4px rgba(250,251,255,1),
-         2px  2px 4px rgba(22,27,29,0.18);
-}
-.graph-control button:active {
-    box-shadow:
-        inset -2px -2px 4px rgba(250,251,255,1),
-        inset  2px  2px 4px rgba(22,27,29,0.18);
-}
-.graph-value {
-    font-family: 'IBM Plex Mono', monospace;
-    color: #185FA5;
-    min-width: 48px;
 }
 
 /* timeline spine */
@@ -534,6 +455,10 @@ body {
     color: #b5bfc6 !important;
     opacity: 1 !important;
 }
+.term-run-btn.term-stop-btn {
+    background: #E24B4A !important;
+    color: white !important;
+}
 .term-action-btn {
     height: 32px;
     width: 80px;
@@ -631,15 +556,14 @@ body {
     <div class="term-tab active" id="tabVcom"  onclick="switchTab('vcom')">
         <span class="term-tab-status connecting" id="statusVcom"></span>VCOM
     </div>
-    <div class="term-tab" id="tabGraph" onclick="showGraph()">📈 Graph</div>
+    <div class="term-tab" id="tabGraph" onclick="showGraph()">📈 Graphe</div>
 </div>
 
 <div class="term-panes">
     <div class="term-pane active" id="paneVcom"></div>
     <div class="term-modern"      id="modernVcom"></div>
-    <div class="term-graph" id="paneGraph">
+    <div class="term-graph"       id="paneGraph">
         <div class="graph-empty" id="graphEmpty">En attente de données du script…</div>
-        <div class="graph-dashboard" id="graphDashboard" style="display:none"></div>
         <div class="graph-canvas" id="graphPlot" style="display:none"></div>
     </div>
 </div>
@@ -662,8 +586,23 @@ body {
 const serial    = location.pathname.split("/").filter(p => p.length > 0).pop();
 const socket    = io();
 
+// Backup for terminal-close cleanup: if the pywebview 'closed' event isn't
+// delivered, this beacon still tells the server to stop the script (and the
+// scenario run it belongs to), close the VCOM channel and drop this board's
+// last-execution caches.
+const runId = new URLSearchParams(location.search).get("run_id") || "";
+window.addEventListener("beforeunload", () => {
+    try {
+        navigator.sendBeacon("/api/terminal-closing",
+                             new Blob([JSON.stringify({ serial, run_id: runId })],
+                                      { type: "application/json" }));
+    } catch (e) {}
+});
+
 socket.on("connect", () => {
     console.log("socket connected:", socket.id);
+    // Identify this window so the server can detect its close (socket drop).
+    socket.emit("terminal_hello", { serial, run_id: runId });
 });
 socket.on("connect_error", (e) => {
     console.error("socket error:", e);
@@ -911,55 +850,28 @@ socket.on("terminal_error", ({ message }) => {
     setStatus(activeTab, "error");
 });
 
-// ── Plotly "Graph" view ──────────────────────────
-// Fully script-driven. Supports two modes:
-//   1) legacy single Plotly figure: board.plot.show({data, layout, config})
-//   2) JSON dashboard: board.plot.dashboard({kind:"dashboard", layout:[...]})
-// Dashboard controls can emit CLI commands through the existing terminal_input path.
+// ── Plotly "Graphe" view ──────────────────────────
+// Fully script-driven: the scenario/board script sends a full figure
+// (plot_figure) and incremental points (plot_extend) via board.plot.* —
+// this side only renders. Events arrive on the board's VCOM room, already
+// joined by this window, so no extra subscription is needed.
 var graphMode   = false;
 var graphInited = false;
 var graphDiv    = null;
-var dashboardPlots = {};
-var dashboardActivePlot = null;
 
 function ensureGraphDiv() {
     if (!graphDiv) graphDiv = document.getElementById("graphPlot");
     return graphDiv;
 }
-function graphEmptyEl() { return document.getElementById("graphEmpty"); }
-function graphDashboardEl() { return document.getElementById("graphDashboard"); }
-function graphRevealLegacy() {
-    graphEmptyEl().style.display = "none";
-    graphDashboardEl().style.display = "none";
+function graphReveal() {
+    document.getElementById("graphEmpty").style.display = "none";
     ensureGraphDiv().style.display = "block";
-}
-function graphRevealDashboard() {
-    graphEmptyEl().style.display = "none";
-    ensureGraphDiv().style.display = "none";
-    graphDashboardEl().style.display = "flex";
-}
-function resizeAllGraphs() {
-    if (!window.Plotly || !graphInited) return;
-    if (Object.keys(dashboardPlots).length) {
-        Object.values(dashboardPlots).forEach(function (gd) { Plotly.Plots.resize(gd); });
-    } else {
-        Plotly.Plots.resize(ensureGraphDiv());
-    }
 }
 
 socket.on("plot_figure", function (spec) {
     if (!window.Plotly) return;
-
-    if (spec && spec.kind === "dashboard") {
-        renderGraphDashboard(spec);
-        return;
-    }
-
     var gd = ensureGraphDiv();
-    graphRevealLegacy();
-    dashboardPlots = {};
-    dashboardActivePlot = gd;
-
+    graphReveal();
     Plotly.react(gd, spec.data || [], spec.layout || {},
                  spec.config || { responsive: true, displaylogo: false });
     graphInited = true;
@@ -967,246 +879,23 @@ socket.on("plot_figure", function (spec) {
 });
 
 socket.on("plot_extend", function (d) {
-    if (!window.Plotly || !graphInited) return;
-
-    var gd = null;
-    if (d.target && dashboardPlots[d.target]) {
-        gd = dashboardPlots[d.target];
-    } else if (dashboardActivePlot) {
-        gd = dashboardActivePlot;
-    } else {
-        gd = ensureGraphDiv();
-    }
-    if (!gd) return;
-
+    if (!window.Plotly || !graphInited) return;   // ignore extends before a figure
+    var gd = ensureGraphDiv();
     var update = { y: d.ys.map(function (v) { return [v]; }) };
     if (d.x !== null && d.x !== undefined) {
         update.x = d.traces.map(function () { return [d.x]; });
     }
     var max = (d.maxpoints === null || d.maxpoints === undefined) ? undefined : d.maxpoints;
     Plotly.extendTraces(gd, update, d.traces, max);
-
-    // Optional moving x-axis viewport. Use board.plot.extend(..., window_s=60).
-    if (d.window_s && d.x !== null && d.x !== undefined) {
-        Plotly.relayout(gd, {
-            "xaxis.range": [Math.max(0, d.x - d.window_s), Math.max(d.window_s, d.x)]
-        });
-    }
 });
 
 socket.on("plot_clear", function () {
     if (!window.Plotly) return;
     Plotly.purge(ensureGraphDiv());
-    Object.values(dashboardPlots).forEach(function (gd) { Plotly.purge(gd); });
-    dashboardPlots = {};
-    dashboardActivePlot = null;
     graphInited = false;
     ensureGraphDiv().style.display = "none";
-    graphDashboardEl().style.display = "none";
-    graphEmptyEl().style.display = "flex";
+    document.getElementById("graphEmpty").style.display = "flex";
 });
-
-function renderGraphDashboard(spec) {
-    graphRevealDashboard();
-
-    var root = graphDashboardEl();
-    root.innerHTML = "";
-    dashboardPlots = {};
-    dashboardActivePlot = null;
-
-    if (spec.title) {
-        var title = document.createElement("div");
-        title.className = "graph-dashboard-title";
-        title.textContent = spec.title;
-        root.appendChild(title);
-    }
-
-    for (const block of spec.layout || []) {
-        if (block.type === "row") {
-            root.appendChild(renderDashboardRow(block));
-        } else {
-            root.appendChild(renderDashboardBlock(block));
-        }
-    }
-
-    graphInited = true;
-    if (graphMode) setTimeout(resizeAllGraphs, 50);
-}
-
-function renderDashboardRow(row) {
-    var div = document.createElement("div");
-    div.className = "graph-dashboard-row";
-    div.style.flex = row.flex || "0 0 auto";
-
-    for (const child of row.children || []) {
-        var childEl = renderDashboardBlock(child);
-        childEl.style.flex = child.flex || "1";
-        div.appendChild(childEl);
-    }
-    return div;
-}
-
-function renderDashboardBlock(block) {
-    if (block.type === "controls") return renderControlBlock(block);
-    if (block.type === "plotly") return renderPlotlyBlock(block);
-    if (block.type === "text") return renderTextBlock(block);
-
-    var unknown = document.createElement("div");
-    unknown.className = "graph-card";
-    unknown.textContent = "Unknown dashboard block: " + block.type;
-    return unknown;
-}
-
-function renderTextBlock(block) {
-    var card = document.createElement("div");
-    card.className = "graph-card";
-    card.id = "dash-" + block.id;
-    card.style.flex = block.flex || "0 0 auto";
-    card.textContent = block.text || "";
-    return card;
-}
-
-function renderControlBlock(block) {
-    var card = document.createElement("div");
-    card.className = "graph-card";
-    card.style.flex = block.flex || "0 0 auto";
-
-    if (block.title) {
-        var title = document.createElement("div");
-        title.className = "graph-card-title";
-        title.textContent = block.title;
-        card.appendChild(title);
-    }
-
-    var grid = document.createElement("div");
-    grid.className = "graph-control-grid";
-    for (const control of block.controls || []) grid.appendChild(renderControl(control));
-    card.appendChild(grid);
-    return card;
-}
-
-function renderControl(control) {
-    var wrap = document.createElement("label");
-    wrap.className = "graph-control";
-
-    if (control.type !== "button") {
-        var label = document.createElement("span");
-        label.textContent = control.label || control.id || "";
-        wrap.appendChild(label);
-    }
-
-    if (control.type === "button") {
-        var btn = document.createElement("button");
-        btn.textContent = control.label || control.id || "Button";
-        btn.onclick = function () { sendDashboardControl(control, true); };
-        wrap.appendChild(btn);
-        return wrap;
-    }
-
-    if (control.type === "slider") {
-        var input = document.createElement("input");
-        input.type = "range";
-        input.min = control.min;
-        input.max = control.max;
-        input.step = control.step || 1;
-        input.value = control.value;
-
-        var valueLabel = document.createElement("span");
-        valueLabel.className = "graph-value";
-        valueLabel.textContent = input.value + (control.unit ? " " + control.unit : "");
-
-        input.oninput = function () {
-            valueLabel.textContent = input.value + (control.unit ? " " + control.unit : "");
-            if (control.send === "input") sendDashboardControl(control, input.value);
-        };
-        input.onchange = function () { sendDashboardControl(control, input.value); };
-
-        wrap.appendChild(input);
-        wrap.appendChild(valueLabel);
-        return wrap;
-    }
-
-    if (control.type === "number") {
-        var number = document.createElement("input");
-        number.type = "number";
-        number.value = control.value;
-        if (control.min !== undefined) number.min = control.min;
-        if (control.max !== undefined) number.max = control.max;
-        if (control.step !== undefined) number.step = control.step;
-        number.onchange = function () { sendDashboardControl(control, number.value); };
-        wrap.appendChild(number);
-        return wrap;
-    }
-
-    if (control.type === "select") {
-        var select = document.createElement("select");
-        for (const opt of control.options || []) {
-            var option = document.createElement("option");
-            option.value = opt.value;
-            option.textContent = opt.label || opt.value;
-            if (opt.value === control.value) option.selected = true;
-            select.appendChild(option);
-        }
-        select.onchange = function () { sendDashboardControl(control, select.value); };
-        wrap.appendChild(select);
-        return wrap;
-    }
-
-    var unknown = document.createElement("span");
-    unknown.textContent = "Unsupported control: " + control.type;
-    wrap.appendChild(unknown);
-    return wrap;
-}
-
-function renderPlotlyBlock(block) {
-    var card = document.createElement("div");
-    card.className = "graph-card";
-    card.style.flex = block.flex || "1";
-    card.style.minHeight = block.minHeight || "260px";
-    card.style.display = "flex";
-    card.style.flexDirection = "column";
-
-    if (block.title) {
-        var title = document.createElement("div");
-        title.className = "graph-card-title";
-        title.textContent = block.title;
-        card.appendChild(title);
-    }
-
-    var div = document.createElement("div");
-    div.id = "dash-plot-" + block.id;
-    div.style.flex = "1";
-    div.style.minHeight = "0";
-    card.appendChild(div);
-
-    setTimeout(function () {
-        Plotly.react(div,
-                    block.figure?.data || [],
-                    block.figure?.layout || {},
-                    block.figure?.config || { responsive: true, displaylogo: false });
-        dashboardPlots[block.id] = div;
-        if (!dashboardActivePlot) dashboardActivePlot = div;
-        if (graphMode) Plotly.Plots.resize(div);
-    }, 0);
-
-    return card;
-}
-
-function sendDashboardControl(control, value) {
-    var room = `${serial}_vcom`;
-    var command = control.command || "";
-    command = command.replaceAll("{value}", String(value));
-
-    // Diagnostic event for future server-side code that wants raw UI values.
-    socket.emit("plot_control", { room: room, id: control.id, value: value, command: command });
-
-    // Test-vehicle behavior: immediately write the generated command to CLI.
-    if (command) {
-        socket.emit("terminal_input", { room: room, data: command + "\r\n" });
-        terminals["vcom"]?.term.writeln(`\x1b[90m› ${command}\x1b[0m`);
-        mvFeed("vcom", `> ${command}\n`);
-    }
-}
 
 function showGraph() {
     graphMode = true;
@@ -1215,7 +904,7 @@ function showGraph() {
     document.querySelectorAll(".term-pane").forEach(function (p) { p.classList.remove("active"); });
     document.querySelectorAll(".term-modern").forEach(function (p) { p.classList.remove("active"); });
     document.getElementById("paneGraph").classList.add("active");
-    if (window.Plotly && graphInited) resizeAllGraphs();
+    if (window.Plotly && graphInited) Plotly.Plots.resize(ensureGraphDiv());
 }
 
 // ── tabs ──────────────────────────────────────────
@@ -1299,27 +988,64 @@ async function pickScript() {
     document.getElementById("termRunBtn").disabled = false;
 }
 
-async function runScript() {
-    if (!selectedScriptPath) return;
+// The button is a Run/Stop toggle whose state is driven by the server:
+// terminal_script_started → Stop, terminal_script_done → Run. The run POST
+// returns immediately (the script runs in a background thread), so we can't
+// rely on it to know when the script actually ends.
+var scriptRunning = false;
+
+function setRunButton(running) {
+    scriptRunning = running;
     const btn = document.getElementById("termRunBtn");
-    btn.disabled = true;
-    btn.innerText = "⏳ Running";
+    if (!btn) return;
+    if (running) {
+        btn.innerText = "■ Stop";
+        btn.classList.add("term-stop-btn");
+        btn.disabled = false;
+    } else {
+        btn.innerText = "▶ Run";
+        btn.classList.remove("term-stop-btn");
+        btn.disabled = !selectedScriptPath;
+    }
+}
+
+async function runScript() {
+    if (scriptRunning) return stopScript();
+    if (!selectedScriptPath) return;
+    setRunButton(true);   // optimistic; server confirms via started/done
     try {
-        await fetch("/api/terminal-run-script", {
+        const r = await fetch("/api/terminal-run-script", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ serial, script_path: selectedScriptPath })
         });
-    } finally {
-        btn.innerText = "▶ Run";
-        btn.disabled = false;
+        const j = await r.json().catch(() => ({}));
+        if (!j.ok) setRunButton(false);   // never started (e.g. file not found)
+    } catch (e) {
+        setRunButton(false);
     }
 }
+
+async function stopScript() {
+    const btn = document.getElementById("termRunBtn");
+    if (btn) { btn.disabled = true; btn.innerText = "Stopping…"; }
+    try {
+        await fetch("/api/terminal-stop-script", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ serial })
+        });
+    } catch (e) {}
+    // The server will emit terminal_script_done when the script actually ends.
+}
+
+socket.on("terminal_script_started", () => setRunButton(true));
+socket.on("terminal_script_done",    () => setRunButton(false));
 
 
 window.addEventListener("resize", () => {
     Object.values(terminals).forEach(({ term, pane }) => fitTerm(term, pane));
-    if (graphMode && window.Plotly && graphInited) resizeAllGraphs();
+    if (graphMode && window.Plotly && graphInited) Plotly.Plots.resize(ensureGraphDiv());
 });
 
 // ── start ─────────────────────────────────────────
