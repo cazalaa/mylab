@@ -158,22 +158,23 @@ async function load() {
         card.onclick = () => addBoard(a);
 
         const isIP         = a.connectivityType !== "usb";
-        const nicknameSpan = a.nickname ? `<span class="board-nickname"> — ${a.nickname}</span>` : "";
-        const secondLine   = [a.boardLabel, a.label].filter(Boolean).join(" · ");
-        const typeLabel    = isIP && a.host ? a.host : (a.connectivityType || "?");
+        const boardId      = (a.boardId && a.boardId !== "Unknown") ? a.boardId : "";
+        const typeLabel    = isIP && a.host ? a.host : "USB";
         const typeClass    = isIP ? "pill-ip" : "pill-usb";
 
         card.innerHTML = `
             <div class="board-info">
-                <div class="board-serial-line">
+                <div class="board-row">
                     <span class="board-serial">${a.serialNumber}</span>
-                    ${nicknameSpan}
+                    <div class="board-row-right">
+                        <span class="pill ${typeClass}">${typeLabel}</span>
+                        ${selected.has(a.serialNumber) ? '<span class="star-icon">★</span>' : ''}
+                    </div>
                 </div>
-                <span class="board-label">${secondLine}</span>
-            </div>
-            <div class="board-right">
-                <span class="pill ${typeClass}">${typeLabel}</span>
-                ${selected.has(a.serialNumber) ? '<span class="star-icon">★</span>' : ''}
+                <div class="board-row">
+                    ${a.nickname ? `<span class="board-nickname">${a.nickname}</span>` : `<span></span>`}
+                    ${boardId ? `<span class="board-id-chip" title="Board number — use as 'board:' in scenarios">${boardId}</span>` : ""}
+                </div>
             </div>`;
         list.appendChild(card);
     });
@@ -196,21 +197,25 @@ function renderSelected() {
 
     cache.filter(a => selected.has(a.serialNumber)).forEach(a => {
         const isIP       = a.connectivityType !== "usb";
-        const secondLine = [a.boardLabel, a.label].filter(Boolean).join(" · ");
-        const hostSuffix = isIP && a.host ? ` — ${a.host}` : "";
+        const boardId    = (a.boardId && a.boardId !== "Unknown") ? a.boardId : "";
+        const typeLabel  = isIP && a.host ? a.host : "USB";
+        const typeClass  = isIP ? "pill-ip" : "pill-usb";
 
         const card = document.createElement("div");
         card.className = "sel-card";
         card.dataset.serial = a.serialNumber;
         card.innerHTML = `
-            <div>
-                <div class="sel-serial">
-                    ${a.serialNumber}
-                    ${a.nickname ? `<span class="sel-serial-nick"> — ${a.nickname}</span>` : ""}
+            <div class="sel-main">
+                <div class="sel-row">
+                    <span class="sel-serial">${a.serialNumber}</span>
+                    <span class="pill ${typeClass}">${typeLabel}</span>
                 </div>
-                <div class="sel-id">${secondLine}${hostSuffix}</div>
+                <div class="sel-row">
+                    ${a.nickname ? `<span class="sel-serial-nick">${a.nickname}</span>` : `<span></span>`}
+                    ${boardId ? `<span class="board-id-chip" title="Board number — use as 'board:' in scenarios">${boardId}</span>` : ""}
+                </div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px">
+            <div class="sel-controls">
                 <span class="card-status" id="status-${a.serialNumber}"></span>
                 <button class="remove-btn" title="Remove">✕</button>
             </div>`;

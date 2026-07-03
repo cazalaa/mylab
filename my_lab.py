@@ -118,13 +118,17 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 # ADAPTER ENUMERATION  (pycommander only — SDM/Silink fully removed)
 # ----------------------------
 _probe_cache: dict[str, dict] = {}   # serial -> kit_info (adapter probe result)
+_boards_cli_cache = None             # {serial: [{"id","name"}, ...]} from `adapter list`, or None
 
 def invalidate_connections(serial=None):
     """Drop cached adapter probe info (after scan / flash / recover / erase)."""
+    global _boards_cli_cache
     if serial is None:
         _probe_cache.clear()
+        _boards_cli_cache = None
     else:
         _probe_cache.pop(str(serial), None)
+        _boards_cli_cache = None
 
 def clear_and_scan():
     """Re-enumerate adapters. pycommander has no scan server to poke; just drop
@@ -138,7 +142,11 @@ def get_adapters():
 def _kit_cached(serial):
     serial = str(serial)
     if serial not in _probe_cache:
-        _probe_cache[serial] = pyc_kit_info(serial=serial)
+        # IP adapters must be probed by --ip, not --serialno, otherwise the probe
+        # returns nothing and kit_part_number (the board number) stays empty.
+        a  = {x["serial"]: x for x in pyc_list_adapters()}.get(serial)
+        ip = (a or {}).get("ip")
+        _probe_cache[serial] = pyc_kit_info(serial=None if ip else serial, ip=ip)
     return _probe_cache[serial]
 
 # ----------------------------
@@ -321,6 +329,112 @@ def _pyc(serial=None, ip=None):
     )
 
 
+def _attr(obj, *names, default=None):
+    """First present & truthy attribute (or dict key) among `names`."""
+    for n in names:
+        try:
+            v = obj.get(n) if isinstance(obj, dict) else getattr(obj, n, None)
+        except Exception:
+            v = None
+        if v not in (None, ""):
+            return v
+    return default
+
+
+def _adapter_boards(obj):
+    """Best-effort list of {id, name} for the boards on an adapter, in the CLI's
+    boardId[0..n] order (WSTK mainboard first, target radio board last). Returns []
+    if the pycommander binding doesn't expose per-board details on this object."""
+    result = []
+    raw = _attr(obj, "boards", "board_list", "boardList")
+    if raw and not isinstance(raw, (str, bytes)):
+        try:
+            for b in raw:
+                bid  = _attr(b, "board_id", "boardId", "id", "part_number", "partNumber")
+                name = _attr(b, "board_name", "boardName", "name")
+                if bid or name:
+                    result.append({"id": str(bid or ""), "name": str(name or "")})
+        except TypeError:
+            pass
+    if not result:
+        # Parallel list attributes (board_id = [...], board_name = [...]).
+        ids   = _attr(obj, "board_id", "board_ids", "boardId", "boardIds")
+        names = _attr(obj, "board_name", "board_names", "boardName", "boardNames")
+        if ids and not isinstance(ids, (str, bytes)):
+            try:
+                ids   = list(ids)
+                names = list(names) if names and not isinstance(names, (str, bytes)) else []
+                for i, bid in enumerate(ids):
+                    nm = names[i] if i < len(names) else ""
+                    result.append({"id": str(bid), "name": str(nm)})
+            except TypeError:
+                pass
+    return result
+
+
+def _target_board_id(boards):
+    """Pick the scenario-relevant board and return a clean id like 'BRD4163A'.
+    Rule: boardId[1] on a WSTK (mainboard[0] + radio[1]); boardId[0] if the
+    enumeration has a single board. '' if unknown."""
+    if not boards:
+        return ""
+    b    = boards[1] if len(boards) >= 2 else boards[0]
+    name = (b.get("name") or "").strip()
+    m    = re.match(r"(BRD\w+)", name, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    bid = (b.get("id") or "").strip()
+    if bid:
+        return bid.upper() if bid.upper().startswith("BRD") else f"BRD{bid}".upper()
+    return ""
+
+
+def _list_adapters_cli_raw():
+    """Run `adapter list` (network + USB) and return combined stdout. Tries the
+    pycommander CLI first, then the Simplicity Commander binary. Returns '' on
+    failure so callers fall back to the probe."""
+    cmds = [["pycommander", "adapter", "list", "--net"],
+            ["pycommander", "adapter", "list", "--usb"]]
+    if COMMANDER_PATH:
+        cmds += [[COMMANDER_PATH, "adapter", "list", "--net"],
+                 [COMMANDER_PATH, "adapter", "list", "--usb"]]
+    outputs = []
+    for cmd in cmds:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+            if r.returncode == 0 and r.stdout and "device(" in r.stdout:
+                outputs.append(r.stdout)
+        except Exception as e:
+            print(f"[ADAPTERS] cli {cmd[0]} …: {e}")
+    return "\n".join(outputs)
+
+
+def _parse_adapter_list(text):
+    """Parse `device(<serial>) { … boardId[i]=… boardName[i]=… }` blocks into
+    {serial: [{'id','name'}, …]} preserving boardId index order."""
+    result = {}
+    for m in re.finditer(r"device\(\s*(\w+)\s*\)\s*\{(.*?)\n\s*\}", text, re.DOTALL):
+        serial, body = m.group(1), m.group(2)
+        idx = {}
+        for bm in re.finditer(r"boardId\[(\d+)\]\s*=\s*(\S+)", body):
+            idx.setdefault(int(bm.group(1)), {})["id"] = bm.group(2).strip()
+        for bm in re.finditer(r"boardName\[(\d+)\]\s*=\s*(.+)", body):
+            idx.setdefault(int(bm.group(1)), {})["name"] = bm.group(2).strip()
+        if idx:
+            result.setdefault(str(serial), [idx[i] for i in sorted(idx)])
+    return result
+
+
+def _cli_boards_for(serial):
+    """Cached per-serial board list from the CLI enumeration (empty if none)."""
+    global _boards_cli_cache
+    if _boards_cli_cache is None:
+        _boards_cli_cache = _parse_adapter_list(_list_adapters_cli_raw())
+        print(f"[ADAPTERS] cli board map: "
+              f"{{ {', '.join(f'{s}:{len(b)}' for s, b in _boards_cli_cache.items())} }}")
+    return _boards_cli_cache.get(str(serial), [])
+
+
 def pyc_list_adapters():
     """USB + network adapter enumeration via pycommander.
 
@@ -333,14 +447,16 @@ def pyc_list_adapters():
         for u in (_pyc().listAvailableAdapters(list_usb_adapters=True) or []):
             if u.jlink_serial_number:
                 out.append({"serial": str(u.jlink_serial_number), "ip": None,
-                            "nickname": u.nickname or "", "connectivity": "usb"})
+                            "nickname": u.nickname or "", "connectivity": "usb",
+                            "boards": _adapter_boards(u)})
     except Exception as e:
         print(f"[WARN] pyc usb list: {e}")
     try:
         for n in (_pyc().listAvailableAdapters(list_network_adapters=True) or []):
             if n.jlink_serial_number:
                 out.append({"serial": str(n.jlink_serial_number), "ip": n.ip_address,
-                            "nickname": n.nickname or "", "connectivity": "ip"})
+                            "nickname": n.nickname or "", "connectivity": "ip",
+                            "boards": _adapter_boards(n)})
     except Exception as e:
         print(f"[WARN] pyc net list: {e}")
     return out
@@ -471,10 +587,21 @@ def adapters():
         serial = a.get("serial")
         if not serial:
             continue
-        kit = _kit_cached(serial)          # `adapter probe` (cached)
+        # Board number for scenarios: prefer the adapter enumeration
+        # (boardId[1] radio on a WSTK, boardId[0] if single). The pycommander
+        # binding usually doesn't expose sub-boards, so fall back to the CLI
+        # `adapter list`; probe kit_part_number is the last resort.
+        boards   = a.get("boards") or _cli_boards_for(serial)
+        board_id = _target_board_id(boards)
+        kit = _kit_cached(serial)          # `adapter probe` (cached) — VCOM, kit name…
+        if not board_id:
+            board_id = (kit.get("kit_part_number", "") or "")
+        if not board_id:
+            print(f"[ADAPTERS] {serial} (ip={a.get('ip')}): no board id — "
+                  f"boards={boards}, probe keys={list(kit.keys())}")
         result.append({
             "serialNumber":     serial,
-            "boardId":          kit.get("kit_part_number", "") or "Unknown",
+            "boardId":          board_id or "Unknown",
             "boardLabel":       kit.get("kit_name", "") or "",
             "connectivityType": a.get("connectivity", "usb"),
             "host":             a.get("ip"),
@@ -1228,18 +1355,34 @@ def scenario_check():
     else:
         full = os.path.abspath(os.path.join(base, path))
         if not full.startswith(base) or not os.path.isfile(full):
-            return jsonify({"ok": False, "issues": [{"line": None, "msg": "File not found"}]}), 400
+            return jsonify({"ok": False, "issues": [{"line": None, "msg": "File not found", "level": "error"}]}), 400
         scenario_dir = os.path.dirname(full)
         with open(full) as f:
             content = f.read()
 
+    issues = check_scenario(content, scenario_dir)
+    return jsonify({"ok": not _scenario_has_errors(issues), "issues": issues, "content": content})
+
+
+def _scenario_has_errors(issues):
+    """An issue with no explicit level is treated as an error."""
+    return any((i.get("level", "error") == "error") for i in issues)
+
+
+def check_scenario(content, scenario_dir):
+    """Validate a scenario YAML against the currently available adapters and the
+    files on disk. Returns a list of {line, msg, level} issues where level is
+    'error' | 'warning' | 'info' (a missing level counts as an error).
+
+    Single source of truth: /api/scenario-check surfaces these to the editor, and
+    /api/scenario-run refuses to launch when any error-level issue is present."""
     scenario_dir = os.path.abspath(scenario_dir)
 
     # Load available adapters (pycommander)
     try:
         adapters_data = _adapters_compat()
     except Exception as e:
-        return jsonify({"ok": False, "issues": [{"line": None, "msg": f"Cannot enumerate adapters: {e}"}]}), 500
+        return [{"line": None, "msg": f"Cannot enumerate adapters: {e}", "level": "error"}]
 
     # Build adapter lookup maps
     # host → adapter, serialNumber → adapter
@@ -1261,7 +1404,7 @@ def scenario_check():
     try:
         scenario = yaml.safe_load(content)
     except yaml.YAMLError as e:
-        return jsonify({"ok": False, "issues": [{"line": None, "msg": f"YAML parse error: {e}"}], "content": content})
+        return [{"line": None, "msg": f"YAML parse error: {e}", "level": "error"}]
 
     lines = content.split("\n")
     def find_line(keyword, start=0):
@@ -1274,7 +1417,7 @@ def scenario_check():
     boards = scenario.get("boards", [])
 
     if not boards:
-        issues.append({"line": find_line("boards"), "msg": "No boards defined"})
+        issues.append({"line": find_line("boards"), "msg": "No boards defined", "level": "error"})
 
     board_search_start = 0
     for i, board in enumerate(boards):
@@ -1352,15 +1495,38 @@ def scenario_check():
                             matching.append(a)
                             break
 
+            def _fmt(a):
+                ident = a.get("host") or a.get("serialNumber", "?")
+                nick  = a.get("nickname")
+                return f"{ident}" + (f" ({nick})" if nick else "")
+
             if matching:
-                suggestions = ", ".join(
-                    f"{a.get('host') or a.get('serialNumber', '?')}"
-                    + (f" ({a.get('nickname')})" if a.get('nickname') else "")
-                    for a in matching
-                )
-                warn("connection",
-                     f"connection=usb — board '{yaml_board_norm}' found on: {suggestions}. "
-                     f"Run will pick one randomly")
+                # Exclude adapters already pinned by another board in this scenario.
+                claimed = set()
+                for j, ob in enumerate(boards):
+                    if j == i:
+                        continue
+                    oc = str(ob.get("connection", ob.get("jlink_name_or_ip", "usb"))).strip()
+                    if oc and oc.lower() not in ("usb", "none", ""):
+                        claimed.add(oc)
+                available = [a for a in matching
+                             if a.get("serialNumber") not in claimed
+                             and a.get("host") not in claimed]
+
+                if available:
+                    n    = len(available)
+                    locs = ", ".join(_fmt(a) for a in available)
+                    warn("connection",
+                         f"connection not set (usb) — a '{yaml_board_norm}' board is "
+                         f"available at {n} location{'s' if n > 1 else ''}: {locs}. "
+                         f"The run will use the first ({_fmt(available[0])}); "
+                         f"set 'connection' to pin a specific one.")
+                else:
+                    all_locs = ", ".join(_fmt(a) for a in matching)
+                    warn("connection",
+                         f"connection not set (usb) — the only '{yaml_board_norm}' "
+                         f"board(s) ({all_locs}) are already assigned to other boards "
+                         f"in this scenario; set 'connection' or free one.")
             else:
                 if adapters_data:
                     warn("connection",
@@ -1387,7 +1553,7 @@ def scenario_check():
                     f_path = os.path.join(scenario_dir, str(f_name))
                     if not os.path.isfile(f_path):
                         line = find_line(str(f_name), board_search_start - 1)
-                        issues.append({"line": line, "msg": f"Board #{i+1}: s37 file '{f_name}' not found in scenario directory"})
+                        issues.append({"line": line, "msg": f"Board #{i+1}: s37 file '{f_name}' not found in scenario directory", "level": "error"})
 
         # ── script (optional) ─────────────────────────
         script = board.get("script", "")
@@ -1415,12 +1581,7 @@ def scenario_check():
             except SyntaxError as e:
                 issues.append({"line": find_line("script:"), "msg": f"Global script syntax error: {e}", "level": "error"})
 
-    errors_only = [i for i in issues if i.get("level") == "error"]
-    return jsonify({
-        "ok":      len(issues) == 0,
-        "issues":  issues,
-        "content": content
-    })
+    return issues
 
 @app.route("/api/scenario-copy-file", methods=["POST"])
 def scenario_copy_file():
@@ -2440,6 +2601,15 @@ def scenario_run():
 
     with open(full) as f:
         content = f.read()
+
+    # Same validation as the Check button — refuse to launch on any error.
+    issues = check_scenario(content, scenario_dir)
+    errors = [i for i in issues if i.get("level", "error") == "error"]
+    if errors:
+        return jsonify({"ok": False,
+                        "error": errors[0]["msg"],
+                        "issues": issues}), 400
+
     try:
         scenario_yaml = yaml.safe_load(content)
     except yaml.YAMLError as e:

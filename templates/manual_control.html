@@ -162,9 +162,7 @@ function renderTestCards(adapters) {
         const typeLabel  = isIP && a.host ? a.host : "USB";
         const typeClass  = isIP ? "pill-ip" : "pill-usb";
         const nick       = a.nickname || "";
-        const model      = a.boardLabel || a.label || "";          // kit name
         const partNo     = (a.boardId && a.boardId !== "Unknown") ? a.boardId : "";
-        const modelLine  = [model, partNo].filter(Boolean).join("  ·  ");
 
         const card = document.createElement("div");
         card.className = "test-card";
@@ -174,8 +172,10 @@ function renderTestCards(adapters) {
                     <span class="board-serial">${a.serialNumber}</span>
                     <span class="pill ${typeClass}">${typeLabel}</span>
                 </div>
-                <div class="board-nickname">${nick}</div>
-                <div class="board-model">${modelLine}</div>
+                <div class="test-card-sub">
+                    ${nick ? `<span class="board-nickname">${nick}</span>` : `<span></span>`}
+                    ${partNo ? `<span class="board-id-chip" title="Board number — use as 'board:' in scenarios">${partNo}</span>` : ""}
+                </div>
             </div>
             <div class="test-card-buttons">
                 <div class="test-btn-row">

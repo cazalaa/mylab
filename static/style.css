@@ -468,6 +468,48 @@ button.error {
     min-width: 380px;
 }
 
+/* Board number (kit part number) — the value used as 'board:' in scenarios */
+.board-id-chip {
+    display: inline-block;
+    margin-top: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    color: #35506b;
+    background: #EFF2F9;
+    padding: 2px 8px;
+    border-radius: 7px;
+    box-shadow: inset -2px -2px 4px #ffffff,
+                inset  2px  2px 4px #d1d9e6;
+    cursor: default;
+}
+
+/* Manual Control compact card: second line = nickname + board chip */
+.test-card-sub {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 2px;
+    min-height: 20px;
+}
+.test-card-sub .board-id-chip { margin-top: 0; }
+.test-card-sub .board-nickname { margin: 0; }
+
+/* Maintenance cards: mirror Manual's two-row grid (serial|conn, nickname|board) */
+.board-row, .sel-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.board-row-right { display: flex; align-items: center; gap: 6px; }
+.sel-main     { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.sel-controls { display: flex; align-items: center; gap: 6px; }
+.board-row .board-id-chip,
+.sel-row  .board-id-chip { margin-top: 0; }
+
 .board-right { 
     display: flex; 
     align-items: center; 

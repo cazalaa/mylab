@@ -463,32 +463,45 @@ async function sc2Check() {
     });
     const data = await res.json();
 
-    if (!data.issues || data.issues.length === 0) {
+    const issues   = data.issues || [];
+    const errors   = issues.filter(i => (i.level || "error") === "error");
+    const warnings = issues.filter(i => i.level === "warning");
+    const infos    = issues.filter(i => i.level === "info");
+
+    const wrap = document.getElementById("sc2CheckWrap");
+    const runBtn = document.getElementById("sc2RunBtn");
+
+    if (errors.length === 0 && warnings.length === 0 && infos.length === 0) {
         btn.innerText = "✓ OK";
         btn.classList.add("success");
-        document.getElementById("sc2RunBtn").disabled = false;
+        runBtn.disabled = false;
+        wrap.style.display = "none";
         setTimeout(() => { btn.innerText = "Check"; btn.classList.remove("success"); }, 2500);
-    } else {
-        const errors   = data.issues.filter(i => i.type === "error");
-        const warnings = data.issues.filter(i => i.type === "warning");
-        if (errors.length) {
-            btn.innerText = `✗ ${errors.length} error${errors.length>1?"s":""}`;
-            btn.classList.add("error");
-            document.getElementById("sc2RunBtn").disabled = true;
-        } else {
-            btn.innerText = `⚠ ${warnings.length} warning${warnings.length>1?"s":""}`;
-            btn.classList.add("open");
-            document.getElementById("sc2RunBtn").disabled = false;
-        }
-        // Show details in check wrap
-        const wrap = document.getElementById("sc2CheckWrap");
-        wrap.style.display = "";
-        let html = "";
-        if (errors.length)   html += errors.map(i   => `<div style="color:#E24B4A">✗ ${sc2Esc(i.msg)}</div>`).join("");
-        if (warnings.length) html += warnings.map(i => `<div style="color:#EF9F27">⚠ ${sc2Esc(i.msg)}</div>`).join("");
-        wrap.innerHTML = html;
-        setTimeout(() => { btn.innerText = "Check"; btn.classList.remove("error","open"); }, 3000);
+        return;
     }
+
+    // Render every issue, grouped by severity.
+    let html = "";
+    html += errors.map(i   => `<div style="color:#E24B4A">✗ ${sc2Esc(i.msg)}</div>`).join("");
+    html += warnings.map(i => `<div style="color:#EF9F27">⚠ ${sc2Esc(i.msg)}</div>`).join("");
+    html += infos.map(i    => `<div style="color:#6b7a89">ℹ ${sc2Esc(i.msg)}</div>`).join("");
+    wrap.style.display = "";
+    wrap.innerHTML = html;
+
+    if (errors.length) {
+        btn.innerText = `✗ ${errors.length} error${errors.length>1?"s":""}`;
+        btn.classList.add("error");
+        runBtn.disabled = true;
+    } else if (warnings.length) {
+        btn.innerText = `⚠ ${warnings.length} warning${warnings.length>1?"s":""}`;
+        btn.classList.add("open");
+        runBtn.disabled = false;
+    } else {
+        btn.innerText = "✓ OK";
+        btn.classList.add("success");
+        runBtn.disabled = false;
+    }
+    setTimeout(() => { btn.innerText = "Check"; btn.classList.remove("error","open","success"); }, 3000);
 }
 
 // ── Run ───────────────────────────────────────────────────────
@@ -506,7 +519,13 @@ async function sc2Run() {
         body: JSON.stringify({ base, path })
     });
     const data = await res.json();
-    if (!data.ok) { alert("Run failed: " + (data.error || "")); return; }
+    if (!data.ok) {
+        const msg = (data.issues && data.issues.length)
+            ? data.issues.map(i => i.msg).join("\n")
+            : (data.error || "");
+        alert("Run refused:\n" + msg);
+        return;
+    }
 
     // Join the run room so we receive socket events
     const sc = getSocket();
