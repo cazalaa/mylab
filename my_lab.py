@@ -118,17 +118,16 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 # ADAPTER ENUMERATION  (pycommander only — SDM/Silink fully removed)
 # ----------------------------
 _probe_cache: dict[str, dict] = {}   # serial -> kit_info (adapter probe result)
-_boards_cli_cache = None             # {serial: [{"id","name"}, ...]} from `adapter list`, or None
+_board_id_cache: dict[str, str] = {} # serial -> board number (Adapter.info(), rev-stripped)
 
 def invalidate_connections(serial=None):
     """Drop cached adapter probe info (after scan / flash / recover / erase)."""
-    global _boards_cli_cache
     if serial is None:
         _probe_cache.clear()
-        _boards_cli_cache = None
+        _board_id_cache.clear()
     else:
         _probe_cache.pop(str(serial), None)
-        _boards_cli_cache = None
+        _board_id_cache.pop(str(serial), None)
 
 def clear_and_scan():
     """Re-enumerate adapters. pycommander has no scan server to poke; just drop
@@ -320,6 +319,12 @@ except Exception as _pyc_e:           # pragma: no cover
     _PYC_OK = False
     print(f"[WARN] pycommander not available: {_pyc_e}")
 
+try:
+    from pycommander import Adapter as _PycAdapter
+except Exception as _pyc_ad_e:        # pragma: no cover
+    _PycAdapter = None
+    print(f"[WARN] pycommander Adapter not available: {_pyc_ad_e}")
+
 
 def _pyc(serial=None, ip=None):
     return _PycCommander(
@@ -327,6 +332,14 @@ def _pyc(serial=None, ip=None):
         ip_address=ip or None,
         executable_path=Path(COMMANDER_PATH) if COMMANDER_PATH else None,
     )
+
+
+def _adapter(serial=None, ip=None):
+    # pycommander Adapter takes exactly ONE identity and no executable_path.
+    # Network adapters must be reached by ip_address; USB ones by serial_number.
+    if ip:
+        return _PycAdapter(ip_address=ip)
+    return _PycAdapter(serial_number=str(serial))
 
 
 def _attr(obj, *names, default=None):
@@ -341,98 +354,75 @@ def _attr(obj, *names, default=None):
     return default
 
 
-def _adapter_boards(obj):
-    """Best-effort list of {id, name} for the boards on an adapter, in the CLI's
-    boardId[0..n] order (WSTK mainboard first, target radio board last). Returns []
-    if the pycommander binding doesn't expose per-board details on this object."""
-    result = []
-    raw = _attr(obj, "boards", "board_list", "boardList")
-    if raw and not isinstance(raw, (str, bytes)):
-        try:
-            for b in raw:
-                bid  = _attr(b, "board_id", "boardId", "id", "part_number", "partNumber")
-                name = _attr(b, "board_name", "boardName", "name")
-                if bid or name:
-                    result.append({"id": str(bid or ""), "name": str(name or "")})
-        except TypeError:
-            pass
-    if not result:
-        # Parallel list attributes (board_id = [...], board_name = [...]).
-        ids   = _attr(obj, "board_id", "board_ids", "boardId", "boardIds")
-        names = _attr(obj, "board_name", "board_names", "boardName", "boardNames")
-        if ids and not isinstance(ids, (str, bytes)):
-            try:
-                ids   = list(ids)
-                names = list(names) if names and not isinstance(names, (str, bytes)) else []
-                for i, bid in enumerate(ids):
-                    nm = names[i] if i < len(names) else ""
-                    result.append({"id": str(bid), "name": str(nm)})
-            except TypeError:
-                pass
-    return result
+def _board_info_list(info):
+    """Normalise Adapter.info() output to a list of AdapterBoardInfo (objects or
+    dicts). Handles the AdapterInfo object (its .board_list), a raw list, or a
+    probe-style {'result': {...}} dict."""
+    if info is None:
+        return []
+    if isinstance(info, dict):
+        res = info.get("result", info)
+        for key in ("board_list", "boards", "board_info", "board_infos", "adapter_boards"):
+            v = res.get(key) if isinstance(res, dict) else None
+            if isinstance(v, (list, tuple)):
+                return list(v)
+        if isinstance(res, dict) and ("part_number" in res or "partNumber" in res):
+            return [res]
+        return []
+    raw = _attr(info, "board_list", "boards", "board_info", "board_infos", "adapter_boards")
+    if raw is not None:
+        return list(raw) if isinstance(raw, (list, tuple)) else [raw]
+    if isinstance(info, (list, tuple)):
+        return list(info)
+    return [info]
 
 
-def _target_board_id(boards):
-    """Pick the scenario-relevant board and return a clean id like 'BRD4163A'.
-    Rule: boardId[1] on a WSTK (mainboard[0] + radio[1]); boardId[0] if the
-    enumeration has a single board. '' if unknown."""
-    if not boards:
+def _strip_rev(pn):
+    """'BRD4186C Rev. A01' -> 'BRD4186C'."""
+    return re.sub(r"\s+Rev\.?\s+\S+\s*$", "", str(pn or ""), flags=re.IGNORECASE).strip()
+
+
+def _raw(obj, *names):
+    """Raw attribute/key value (first that EXISTS, even if falsy); None if absent.
+    Unlike _attr, it does not treat None/'' as 'absent' — needed to test
+    `target_device is not None` exactly."""
+    for n in names:
+        if isinstance(obj, dict):
+            if n in obj:
+                return obj[n]
+        elif hasattr(obj, n):
+            return getattr(obj, n)
+    return None
+
+
+def _board_id_from_info(serial, ip=None):
+    """Board number for a card via pycommander adapter.info(): return the
+    part_number (without the ' Rev. XX' suffix) of the ONE AdapterBoardInfo whose
+    target_device is not None — i.e. the actual target board (BRD/DK/TB/EK/WSTK…),
+    never the mainboard or the kit name. '' if that entry can't be found."""
+    serial_key = str(serial)
+    if serial_key in _board_id_cache:
+        return _board_id_cache[serial_key]
+    if _PycAdapter is None:
         return ""
-    b    = boards[1] if len(boards) >= 2 else boards[0]
-    name = (b.get("name") or "").strip()
-    m    = re.match(r"(BRD\w+)", name, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    bid = (b.get("id") or "").strip()
-    if bid:
-        return bid.upper() if bid.upper().startswith("BRD") else f"BRD{bid}".upper()
-    return ""
 
+    try:
+        info = _adapter(serial=serial, ip=ip).info()
+    except Exception as e:
+        print(f"[ADAPTERS] {serial}: Adapter.info() failed: {e}")
+        return ""
 
-def _list_adapters_cli_raw():
-    """Run `adapter list` (network + USB) and return combined stdout. Tries the
-    pycommander CLI first, then the Simplicity Commander binary. Returns '' on
-    failure so callers fall back to the probe."""
-    cmds = [["pycommander", "adapter", "list", "--net"],
-            ["pycommander", "adapter", "list", "--usb"]]
-    if COMMANDER_PATH:
-        cmds += [[COMMANDER_PATH, "adapter", "list", "--net"],
-                 [COMMANDER_PATH, "adapter", "list", "--usb"]]
-    outputs = []
-    for cmd in cmds:
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
-            if r.returncode == 0 and r.stdout and "device(" in r.stdout:
-                outputs.append(r.stdout)
-        except Exception as e:
-            print(f"[ADAPTERS] cli {cmd[0]} …: {e}")
-    return "\n".join(outputs)
+    boards = _board_info_list(info)
+    target = next((b for b in boards
+                   if _raw(b, "target_device", "targetDevice") is not None), None)
+    if target is None:
+        print(f"[ADAPTERS] {serial}: no AdapterBoardInfo with target_device set; "
+              f"raw={repr(info)[:600]}")
+        return ""
 
-
-def _parse_adapter_list(text):
-    """Parse `device(<serial>) { … boardId[i]=… boardName[i]=… }` blocks into
-    {serial: [{'id','name'}, …]} preserving boardId index order."""
-    result = {}
-    for m in re.finditer(r"device\(\s*(\w+)\s*\)\s*\{(.*?)\n\s*\}", text, re.DOTALL):
-        serial, body = m.group(1), m.group(2)
-        idx = {}
-        for bm in re.finditer(r"boardId\[(\d+)\]\s*=\s*(\S+)", body):
-            idx.setdefault(int(bm.group(1)), {})["id"] = bm.group(2).strip()
-        for bm in re.finditer(r"boardName\[(\d+)\]\s*=\s*(.+)", body):
-            idx.setdefault(int(bm.group(1)), {})["name"] = bm.group(2).strip()
-        if idx:
-            result.setdefault(str(serial), [idx[i] for i in sorted(idx)])
-    return result
-
-
-def _cli_boards_for(serial):
-    """Cached per-serial board list from the CLI enumeration (empty if none)."""
-    global _boards_cli_cache
-    if _boards_cli_cache is None:
-        _boards_cli_cache = _parse_adapter_list(_list_adapters_cli_raw())
-        print(f"[ADAPTERS] cli board map: "
-              f"{{ {', '.join(f'{s}:{len(b)}' for s, b in _boards_cli_cache.items())} }}")
-    return _boards_cli_cache.get(str(serial), [])
+    board_id = _strip_rev(_attr(target, "part_number", "partNumber", default=""))
+    _board_id_cache[serial_key] = board_id
+    return board_id
 
 
 def pyc_list_adapters():
@@ -447,16 +437,14 @@ def pyc_list_adapters():
         for u in (_pyc().listAvailableAdapters(list_usb_adapters=True) or []):
             if u.jlink_serial_number:
                 out.append({"serial": str(u.jlink_serial_number), "ip": None,
-                            "nickname": u.nickname or "", "connectivity": "usb",
-                            "boards": _adapter_boards(u)})
+                            "nickname": u.nickname or "", "connectivity": "usb"})
     except Exception as e:
         print(f"[WARN] pyc usb list: {e}")
     try:
         for n in (_pyc().listAvailableAdapters(list_network_adapters=True) or []):
             if n.jlink_serial_number:
                 out.append({"serial": str(n.jlink_serial_number), "ip": n.ip_address,
-                            "nickname": n.nickname or "", "connectivity": "ip",
-                            "boards": _adapter_boards(n)})
+                            "nickname": n.nickname or "", "connectivity": "ip"})
     except Exception as e:
         print(f"[WARN] pyc net list: {e}")
     return out
@@ -587,18 +575,10 @@ def adapters():
         serial = a.get("serial")
         if not serial:
             continue
-        # Board number for scenarios: prefer the adapter enumeration
-        # (boardId[1] radio on a WSTK, boardId[0] if single). The pycommander
-        # binding usually doesn't expose sub-boards, so fall back to the CLI
-        # `adapter list`; probe kit_part_number is the last resort.
-        boards   = a.get("boards") or _cli_boards_for(serial)
-        board_id = _target_board_id(boards)
+        # Board number: strictly the AdapterBoardInfo whose target_device is set
+        # (via adapter.info()). No kit-name / prefix fallback — empty if not found.
+        board_id = _board_id_from_info(serial, a.get("ip"))
         kit = _kit_cached(serial)          # `adapter probe` (cached) — VCOM, kit name…
-        if not board_id:
-            board_id = (kit.get("kit_part_number", "") or "")
-        if not board_id:
-            print(f"[ADAPTERS] {serial} (ip={a.get('ip')}): no board id — "
-                  f"boards={boards}, probe keys={list(kit.keys())}")
         result.append({
             "serialNumber":     serial,
             "boardId":          board_id or "Unknown",
