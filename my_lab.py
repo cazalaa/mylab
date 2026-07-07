@@ -177,14 +177,31 @@ def _conn_flag(serial):
 
 def _adapters_compat():
     """pycommander adapters in the legacy {serialNumber, host, nickname, boards}
-    shape consumed by the scenario validator/resolver. There is no board
-    database without SDM, so `boards` is always empty."""
-    return [{
-        "serialNumber": a["serial"],
-        "host":         a.get("ip"),
-        "nickname":     a.get("nickname", ""),
-        "boards":       [],
-    } for a in pyc_list_adapters()]
+    shape consumed by the scenario validator/resolver."""
+    out = []
+    for a in pyc_list_adapters():
+        serial = a.get("serial")
+        if not serial:
+            continue
+
+        board_id = _board_id_from_info(serial, a.get("ip")) or ""
+        boards = []
+        if board_id:
+            short = re.sub(r"^BRD", "", board_id, flags=re.IGNORECASE).upper()
+            boards.append({
+                "id": board_id,
+                "shortLabel": short,
+                "label": board_id,
+                "pn": board_id,
+            })
+
+        out.append({
+            "serialNumber": serial,
+            "host":         a.get("ip"),
+            "nickname":     a.get("nickname", ""),
+            "boards":       boards,
+        })
+    return out
 
 
 def reset_mcu(serial):
@@ -1443,7 +1460,7 @@ def check_scenario(content, scenario_dir):
                     issue("connection",
                           f"'{connection}' not found in available adapters")
                 elif board_id:
-                    yaml_board_norm = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE)
+                    yaml_board_norm = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE).upper()
                     adapter_boards  = matched_adapter.get("boards", [])
                     adapter_board_ids = set()
                     for ab in adapter_boards:

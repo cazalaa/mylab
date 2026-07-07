@@ -1,9 +1,9 @@
 boards:
-  - board: 2705A
+  - board: BRD2705A
     connection: '440330454'
     s37_files:
-      - rail_soc_railtest_2705A.s37
-    script: railtest_script_15_4_min.py
+      - rail_soc_railtest_28.s37
+    script: railtest_script_15_4_spectrum_analyzer_wait_full.py
     masserase: true
     halt_reset: false
     open_terminal: true
