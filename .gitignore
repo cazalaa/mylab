@@ -1,1 +1,16 @@
 .aider*
+# logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# sorties / archives temporaires
+/output/
+Archive_clean_*/
