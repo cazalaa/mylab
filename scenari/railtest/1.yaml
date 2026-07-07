@@ -2,7 +2,9 @@ boards:
   - nickname: wstk192168181
     board: 4163A
     connection: 192.168.1.195
-    script: railtest_script_15_4_spectrum_analyzer.py
-    masserase: false
+    s37_files:
+      - rail_soc_railtest_4162A.s37
+    script: railtest_script_15_4_spectrum_analyzer_wait_full.py
+    masserase: true
     halt_reset: false
     open_terminal: true
