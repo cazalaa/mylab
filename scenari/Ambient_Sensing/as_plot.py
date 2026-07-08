@@ -3,29 +3,10 @@ import re
 
 
 BULB_RE = re.compile(r"is_bulb_on\s*:\s*(\d+)", re.IGNORECASE)
-MOVEMENT_RE = re.compile(r"Movement\s+Score\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*%", re.IGNORECASE)
-
-
-def read_pending_cli(board):
-    if hasattr(board, "read_vcom"):
-        return board.read_vcom()
-
-    if hasattr(board, "vcom_read"):
-        return board.vcom_read()
-
-    if hasattr(board, "read"):
-        return board.read()
-
-    if hasattr(board, "readline"):
-        return board.readline()
-
-    if hasattr(board, "read_line"):
-        return board.read_line()
-
-    try:
-        return board.cli("")
-    except Exception:
-        return ""
+MOVEMENT_RE = re.compile(
+    r"Movement\s+Score\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+    re.IGNORECASE,
+)
 
 
 def parse_values(text):
@@ -109,12 +90,15 @@ def script(board):
 
     board.print("--- Motion / bulb live plot, rolling 60 s viewport ---")
 
-    # Keep only if you want to restart the board app.
+    # Keep this if you want to restart the board app before the test.
     board.reset()
     board.delay(1)
 
     board.print("--- setting motion idle time to 3000 ms ---")
-    out = board.cli("ai_sensing_set_motion_idle_time 3000")
+    board.cli("ai_sensing_set_motion_idle_time 3000")
+
+    board.print("--- starting AI sensing ---")
+    out = board.cli("as start")
 
     last_bulb = 0
     last_movement = 0.0
@@ -126,21 +110,23 @@ def script(board):
         last_movement = movement
 
     window_s = 60.0
+
+    # Read often, redraw less often.
     poll_s = 0.1
+    redraw_period_s = 0.25
 
     xs = []
     movement_values = []
     bulb_values = []
 
     t0 = time.time()
+    last_sample = 0.0
     last_redraw = 0.0
-    redraw_period_s = 0.1
 
-    # Initial empty plot.
     board.plot.show(make_figure(xs, movement_values, bulb_values, 0, window_s))
 
     while True:
-        out = read_pending_cli(board)
+        out = board.read()
         bulb, movement = parse_values(out)
 
         if bulb is not None:
@@ -151,10 +137,12 @@ def script(board):
 
         t = round(time.time() - t0, 3)
 
-        # Add one sample every loop using the latest known values.
-        xs.append(t)
-        movement_values.append(last_movement)
-        bulb_values.append(last_bulb)
+        # Add one sample per poll using the latest known values.
+        if t - last_sample >= poll_s:
+            xs.append(t)
+            movement_values.append(last_movement)
+            bulb_values.append(last_bulb)
+            last_sample = t
 
         # Keep only the last 60 seconds of local data.
         cutoff = t - window_s
@@ -163,10 +151,11 @@ def script(board):
             movement_values.pop(0)
             bulb_values.pop(0)
 
-        # Redraw periodically so the x-axis range follows the latest 60 seconds.
-        # This is the part that "zooms" to the last 60s.
+        # Redraw the full plot less often than we read the CLI.
         if t - last_redraw >= redraw_period_s:
-            board.plot.show(make_figure(xs, movement_values, bulb_values, t, window_s))
+            board.plot.show(
+                make_figure(xs, movement_values, bulb_values, t, window_s)
+            )
             last_redraw = t
 
-        # board.delay(poll_s)
+        board.delay(poll_s)
