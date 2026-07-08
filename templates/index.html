@@ -42,13 +42,35 @@ async function refreshCache() {
 }
 const loadedPages = new Set();
 
+// Navigation is fully serialized: while one togglePage() is resolving its
+// awaits (fetch /page, /adapters), further clicks don't run concurrently —
+// they're remembered as `pendingPage` and applied once the current one
+// finishes (last click wins). This prevents overlapping fragment injection
+// (doubled pages) and stale async completions showing a page you've left.
+let navBusy = false;
+let pendingPage = null;
+
 async function togglePage(name) {
+    if (navBusy) { pendingPage = name; return; }   // coalesce rapid clicks
+    navBusy = true;
+    try {
+        await _navigatePage(name);
+    } finally {
+        navBusy = false;
+        const next = pendingPage;
+        pendingPage = null;
+        if (next && next !== activePage) togglePage(next);
+    }
+}
+
+async function _navigatePage(name) {
     const wrap   = document.getElementById("contentWrap");
     const topbar = document.getElementById("topbar");
 
     if (activePage === name) {
         activePage = null;
-        document.getElementById(`page-${name}`).style.display = "none";
+        const cur = document.getElementById(`page-${name}`);
+        if (cur) cur.style.display = "none";
         wrap.classList.remove("expanded");
         topbar.classList.remove("expanded");
         document.querySelectorAll(".topbar-actions button").forEach(b => b.classList.remove("open"));
@@ -58,7 +80,8 @@ async function togglePage(name) {
 
     // Cacher la page courante
     if (activePage) {
-        document.getElementById(`page-${activePage}`).style.display = "none";
+        const cur = document.getElementById(`page-${activePage}`);
+        if (cur) cur.style.display = "none";
     }
 
     if (!loadedPages.has(name)) {
@@ -67,9 +90,14 @@ async function togglePage(name) {
         const res  = await fetch(`/page/${name}`);
         const html = await res.text();
 
-        const div = document.createElement("div");
-        div.id = `page-${name}`;
-        wrap.appendChild(div);
+        // Anti-doublon : si un div de cette page existe déjà, le réutiliser
+        // au lieu d'en créer un second avec le même id.
+        let div = document.getElementById(`page-${name}`);
+        if (!div) {
+            div = document.createElement("div");
+            div.id = `page-${name}`;
+            wrap.appendChild(div);
+        }
         div.innerHTML = html;
 
         div.querySelectorAll("script").forEach(old => {

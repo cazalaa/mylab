@@ -600,7 +600,9 @@ function sc2ImportGroup(gdata) {
             ? (a.serialNumber || "").trim().toLowerCase()
             : (a.host || "").trim().toLowerCase();
         const nick      = (a.nickname || "").trim().toLowerCase();
-        const boardShort = a.boardId ? a.boardId.replace(/^BRD/i,"") : "";
+        const boardShort = a.boardId
+            ? a.boardId.replace(/\s+Rev\.?\s+\S+\s*$/i, "").replace(/^BRD/i, "").trim()
+            : "";
 
         // Skip if connection or nickname already exists
         if (conn && existingConns.has(conn)) { skipped++; return; }

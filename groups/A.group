@@ -1,0 +1,13 @@
+{
+  "name": "A",
+  "adapters": [
+    {
+      "serialNumber": "440065813",
+      "connectivityType": "ip",
+      "host": "192.168.1.195",
+      "nickname": "wstk192168181",
+      "boardId": "BRD4163A",
+      "boardLabel": "Wireless Gecko Multiband 2.4GHz/Sub-GHz Kit"
+    }
+  ]
+}

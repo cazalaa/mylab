@@ -177,26 +177,15 @@ def _conn_flag(serial):
 
 def _adapters_compat():
     """pycommander adapters in the legacy {serialNumber, host, nickname, boards}
-    shape consumed by the scenario validator/resolver."""
+    shape consumed by the scenario validator/resolver. `boards` now carries the
+    real target board (from Adapter.info()) so the check can match the scenario's
+    `board:` against what's physically connected. Empty if it can't be read."""
     out = []
     for a in pyc_list_adapters():
-        serial = a.get("serial")
-        if not serial:
-            continue
-
-        board_id = _board_id_from_info(serial, a.get("ip")) or ""
-        boards = []
-        if board_id:
-            short = re.sub(r"^BRD", "", board_id, flags=re.IGNORECASE).upper()
-            boards.append({
-                "id": board_id,
-                "shortLabel": short,
-                "label": board_id,
-                "pn": board_id,
-            })
-
+        bid = _board_id_from_info(a["serial"], a.get("ip"))   # e.g. 'BRD2606A' (rev-stripped)
+        boards = [{"id": bid, "shortLabel": bid, "label": bid, "pn": bid}] if bid else []
         out.append({
-            "serialNumber": serial,
+            "serialNumber": a["serial"],
             "host":         a.get("ip"),
             "nickname":     a.get("nickname", ""),
             "boards":       boards,
@@ -397,6 +386,16 @@ def _board_info_list(info):
 def _strip_rev(pn):
     """'BRD4186C Rev. A01' -> 'BRD4186C'."""
     return re.sub(r"\s+Rev\.?\s+\S+\s*$", "", str(pn or ""), flags=re.IGNORECASE).strip()
+
+
+def _norm_board(s):
+    """Normalise a board id for comparison: drop the ' Rev. XX' suffix and the
+    'BRD' prefix, keep the first token, uppercase.
+    'BRD2606A Rev. A1', 'BRD2606A', '2606A' all -> '2606A'."""
+    s = _strip_rev(s)
+    parts = s.split()
+    s = parts[0] if parts else s
+    return re.sub(r"^BRD", "", s, flags=re.IGNORECASE).strip().upper()
 
 
 def _raw(obj, *names):
@@ -1460,19 +1459,19 @@ def check_scenario(content, scenario_dir):
                     issue("connection",
                           f"'{connection}' not found in available adapters")
                 elif board_id:
-                    yaml_board_norm = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE).upper()
+                    yaml_board_norm = _norm_board(board_id)
                     adapter_boards  = matched_adapter.get("boards", [])
                     adapter_board_ids = set()
                     for ab in adapter_boards:
                         for field in ["id", "shortLabel", "label", "pn"]:
                             val = ab.get(field, "")
                             if val:
-                                normalized = re.sub(r'^BRD', '', val.split()[0], flags=re.IGNORECASE).upper()
-                                adapter_board_ids.add(normalized)
-                    if yaml_board_norm not in adapter_board_ids:
-                        nick      = matched_adapter.get("nickname") or matched_adapter.get("serialNumber", "")
-                        best_id   = adapter_boards[0].get("shortLabel", adapter_boards[0].get("id", "?")) if adapter_boards else "?"
-                        best_short = re.sub(r'^BRD', '', best_id, flags=re.IGNORECASE)
+                                adapter_board_ids.add(_norm_board(val))
+                    # Only flag a mismatch when the adapter's board is actually
+                    # known — if it can't be read (card busy/offline), stay OK.
+                    if adapter_board_ids and yaml_board_norm not in adapter_board_ids:
+                        nick       = matched_adapter.get("nickname") or matched_adapter.get("serialNumber", "")
+                        best_short = sorted(adapter_board_ids)[0]
                         issue("board",
                               f"adapter '{connection}' ({nick}) has board '{best_short}' "
                               f"but scenario specifies '{yaml_board_norm}'. "
@@ -1480,15 +1479,14 @@ def check_scenario(content, scenario_dir):
 
         # If board_id set but connection=usb — check if an available adapter has that board
         if board_id and connection == "usb":
-            yaml_board_norm = re.sub(r'^BRD', '', str(board_id), flags=re.IGNORECASE).upper()
+            yaml_board_norm = _norm_board(board_id)
             matching = []
             for a in adapters_data:
                 adapter_boards = a.get("boards", [])
                 for ab in adapter_boards:
-                    for field in ["id", "shortLabel"]:
+                    for field in ["id", "shortLabel", "label", "pn"]:
                         val = ab.get(field, "")
-                        normalized = re.sub(r'^BRD', '', val.split()[0] if val else "", flags=re.IGNORECASE).upper()
-                        if normalized == yaml_board_norm:
+                        if val and _norm_board(val) == yaml_board_norm:
                             matching.append(a)
                             break
 
