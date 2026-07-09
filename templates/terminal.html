@@ -897,6 +897,12 @@ socket.on("plot_clear", function () {
     document.getElementById("graphEmpty").style.display = "flex";
 });
 
+socket.on("terminal_select_view", function (d) {
+    var v = d && d.view;
+    if (v === "graph") showGraph();
+    else switchTab("vcom");
+});
+
 function showGraph() {
     graphMode = true;
     document.querySelectorAll(".term-tab").forEach(function (t) { t.classList.remove("active"); });
@@ -973,6 +979,16 @@ if (new URLSearchParams(window.location.search).get("from_run") === "1") {
         if (nameEl) nameEl.style.display = "none";
     }, 50);
 }
+
+// Pre-select the pane when opened via board.show_terminal('graph'|'cli').
+(function () {
+    var view = new URLSearchParams(window.location.search).get("view");
+    if (!view) return;
+    setTimeout(function () {
+        if (view === "graph") showGraph();
+        else switchTab("vcom");
+    }, 300);
+})();
 
 async function pickScript() {
     let path = null;

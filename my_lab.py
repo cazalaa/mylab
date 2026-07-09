@@ -1365,6 +1365,87 @@ def _scenario_has_errors(issues):
     return any((i.get("level", "error") == "error") for i in issues)
 
 
+def _adapter_board_norms(a):
+    """Set of normalised board ids present on an adapter (from its 'boards')."""
+    norms = set()
+    for ab in a.get("boards", []):
+        for field in ("id", "shortLabel", "label", "pn"):
+            v = ab.get(field, "")
+            if v:
+                norms.add(_norm_board(v))
+    norms.discard("")
+    return norms
+
+
+def _allocate_adapters(boards, adapters_data):
+    """Assign one distinct adapter to each board from a shared pool — no adapter
+    used twice. Explicit connections (serial/IP) reserve their adapter first;
+    usb boards (no serial) are then auto-picked from the remaining pool, matching
+    the board type when given. Used by both the check (dry-run) and the run.
+
+    Returns (assignments, errors):
+      assignments[i] = adapter dict or None
+      errors = [{'index', 'kind', 'msg'}]  (kind: notfound/duplicate/
+               usb_nomatch/usb_exhausted/usb_none)"""
+    by_host   = {a.get("host"): a for a in adapters_data
+                 if a.get("host") and not _is_loopback_host(a.get("host"))}
+    by_serial = {a.get("serialNumber"): a for a in adapters_data if a.get("serialNumber")}
+
+    assignments = [None] * len(boards)
+    used        = set()
+    errors      = []
+
+    def conn_of(b):
+        c = str(b.get("connection", b.get("jlink_name_or_ip", "usb"))).strip()
+        return "usb" if c.lower() in ("none", "") else c
+
+    # Pass 1 — explicit connections reserve their adapter first.
+    for i, b in enumerate(boards):
+        conn = conn_of(b)
+        if conn == "usb":
+            continue
+        a = by_host.get(conn) or by_serial.get(conn)
+        if not a:
+            errors.append({"index": i, "kind": "notfound",
+                           "msg": f"'{conn}' not found in available adapters"})
+            continue
+        sn = a.get("serialNumber")
+        if sn in used:
+            errors.append({"index": i, "kind": "duplicate",
+                           "msg": f"adapter '{conn}' is assigned to more than one board"})
+            continue
+        used.add(sn)
+        assignments[i] = a
+
+    # Pass 2 — usb boards auto-pick from the remaining pool.
+    for i, b in enumerate(boards):
+        if conn_of(b) != "usb":
+            continue
+        norm = _norm_board(b.get("board", "")) if str(b.get("board", "")).strip() else ""
+        pool = [a for a in adapters_data if a.get("serialNumber") not in used]
+        if norm:
+            pick = next((a for a in pool if norm in _adapter_board_norms(a)), None)
+            if not pick:
+                if any(norm in _adapter_board_norms(a) for a in adapters_data):
+                    errors.append({"index": i, "kind": "usb_exhausted",
+                                   "msg": f"no free adapter left with board '{norm}' "
+                                          f"(all matching adapters already assigned)"})
+                else:
+                    errors.append({"index": i, "kind": "usb_nomatch",
+                                   "msg": f"no connected adapter has board '{norm}'"})
+                continue
+        else:
+            pick = pool[0] if pool else None
+            if not pick:
+                errors.append({"index": i, "kind": "usb_none",
+                               "msg": "no free adapter left to assign (pool exhausted)"})
+                continue
+        used.add(pick.get("serialNumber"))
+        assignments[i] = pick
+
+    return assignments, errors
+
+
 def check_scenario(content, scenario_dir):
     """Validate a scenario YAML against the currently available adapters and the
     files on disk. Returns a list of {line, msg, level} issues where level is
@@ -1477,58 +1558,10 @@ def check_scenario(content, scenario_dir):
                               f"but scenario specifies '{yaml_board_norm}'. "
                               f"Consider changing board to '{best_short}'")
 
-        # If board_id set but connection=usb — check if an available adapter has that board
-        if board_id and connection == "usb":
-            yaml_board_norm = _norm_board(board_id)
-            matching = []
-            for a in adapters_data:
-                adapter_boards = a.get("boards", [])
-                for ab in adapter_boards:
-                    for field in ["id", "shortLabel", "label", "pn"]:
-                        val = ab.get(field, "")
-                        if val and _norm_board(val) == yaml_board_norm:
-                            matching.append(a)
-                            break
+        # usb boards (no explicit connection) are validated globally by the
+        # adapter-allocation dry-run after this loop (pool consumed per board,
+        # no duplicates) — same logic the run uses.
 
-            def _fmt(a):
-                ident = a.get("host") or a.get("serialNumber", "?")
-                nick  = a.get("nickname")
-                return f"{ident}" + (f" ({nick})" if nick else "")
-
-            if matching:
-                # Exclude adapters already pinned by another board in this scenario.
-                claimed = set()
-                for j, ob in enumerate(boards):
-                    if j == i:
-                        continue
-                    oc = str(ob.get("connection", ob.get("jlink_name_or_ip", "usb"))).strip()
-                    if oc and oc.lower() not in ("usb", "none", ""):
-                        claimed.add(oc)
-                available = [a for a in matching
-                             if a.get("serialNumber") not in claimed
-                             and a.get("host") not in claimed]
-
-                if available:
-                    n    = len(available)
-                    locs = ", ".join(_fmt(a) for a in available)
-                    warn("connection",
-                         f"connection not set (usb) — a '{yaml_board_norm}' board is "
-                         f"available at {n} location{'s' if n > 1 else ''}: {locs}. "
-                         f"The run will use the first ({_fmt(available[0])}); "
-                         f"set 'connection' to pin a specific one.")
-                else:
-                    all_locs = ", ".join(_fmt(a) for a in matching)
-                    warn("connection",
-                         f"connection not set (usb) — the only '{yaml_board_norm}' "
-                         f"board(s) ({all_locs}) are already assigned to other boards "
-                         f"in this scenario; set 'connection' or free one.")
-            else:
-                if adapters_data:
-                    warn("connection",
-                         f"connection=usb and no adapter with board '{yaml_board_norm}' found")
-                else:
-                    info("connection",
-                         f"no adapters available — connect a board with '{yaml_board_norm}'")
         # ── booleans (optional, with defaults) ────────
         for field, default in [("masserase", True), ("halt_reset", False), ("open_terminal", False)]:
             val = board.get(field)
@@ -1561,6 +1594,18 @@ def check_scenario(content, scenario_dir):
     yaml_nicks = [str(b.get("nickname", "")).strip() for b in boards if b.get("nickname")]
     if len(yaml_nicks) != len(set(yaml_nicks)):
         issues.append({"line": find_line("nickname"), "msg": "Duplicate nicknames in scenario", "level": "error"})
+
+    # ── adapter allocation dry-run (same pool logic as the run) ────
+    # usb boards each need a distinct free adapter (matching board type when
+    # given); explicit connections must be unique. 'notfound' is skipped here
+    # because it's already reported per-board above.
+    _, alloc_errors = _allocate_adapters(boards, adapters_data)
+    for e in alloc_errors:
+        if e["kind"] == "notfound":
+            continue
+        issues.append({"line": None,
+                       "msg": f"Board #{e['index'] + 1}: {e['msg']}",
+                       "level": "error"})
 
     # ── global script (optional) ──────────────────────────────
     global_script = scenario.get("script")
@@ -1837,6 +1882,11 @@ def _exec_board_script(board, script_code, run_id):
 
     emit_status("running")
     try:
+        # Guarantee the background com is open even when no terminal is shown:
+        # the terminal is only a display; a scripted board must be able to talk
+        # to the hardware regardless of open_terminal.
+        if not getattr(board, "_vcom_sock", None):
+            board.connect()
         namespace = {
             "board": board,
             "time":  time,
@@ -2128,6 +2178,29 @@ class Board:
                 terminal_windows.setdefault(self.run_id, []).append(win)
                 _register_terminal_close(win, self.serial, self.run_id)
             threading.Thread(target=_open, daemon=True).start()
+
+    def show_terminal(self, view="cli"):
+        """Force-open (or focus) this board's DISPLAY terminal, pre-selecting the
+        'graph' or 'cli' pane. The VCOM channel is already open in the background
+        (connect() opens it regardless of open_terminal); this only affects what
+        is shown. Callable from a board/global script, e.g. board.show_terminal('graph').
+        If a terminal is already live for this board, its pane is switched instead
+        of opening a duplicate."""
+        v    = "graph" if str(view).strip().lower() in ("graph", "graphe", "plot") else "cli"
+        room = f"{self.serial}_vcom"
+        # Already displayed somewhere → just switch its pane.
+        if terminal_live.get(self.serial):
+            socketio.emit("terminal_select_view", {"view": v, "room": room}, room=room)
+            return
+        def _open():
+            url = (f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}"
+                   f"?from_run=1&run_id={self.run_id}&view={v}")
+            win = webview.create_window(
+                f"{self.serial} — Terminal", url,
+                width=820, height=620, resizable=True)
+            terminal_windows.setdefault(self.run_id, []).append(win)
+            _register_terminal_close(win, self.serial, self.run_id)
+        threading.Thread(target=_open, daemon=True).start()
 
     def write_cli(self, data):
         self._ck()
@@ -2617,55 +2690,34 @@ def scenario_run():
     # Fetch available adapters (pycommander)
     try:
         adapters_data = _adapters_compat()
-        adapter_by_host   = {a.get("host"): a for a in adapters_data if a.get("host") and not _is_loopback_host(a.get("host"))}
-        adapter_by_serial = {a.get("serialNumber"): a for a in adapters_data if a.get("serialNumber")}
     except Exception as e:
         return jsonify({"ok": False, "error": f"Cannot enumerate adapters: {e}"}), 500
 
-    # Resolve each board entry
+    # Resolve each board to a concrete adapter via the shared pool allocation:
+    # explicit connections reserved first, usb boards auto-picked from the
+    # remaining pool (matching board type), each adapter used at most once.
+    assignments, alloc_errors = _allocate_adapters(boards_cfg, adapters_data)
+    if alloc_errors:
+        e = alloc_errors[0]
+        return jsonify({"ok": False,
+                        "error": f"Board #{e['index'] + 1}: {e['msg']}"}), 400
+
     resolved_boards = []
-    for b in boards_cfg:
-        # connection: usb (default), USB serial number, or real external IP address
+    for i, b in enumerate(boards_cfg):
+        adapter = assignments[i]
+        if not adapter:
+            return jsonify({"ok": False,
+                            "error": f"No adapter found for board entry {b.get('board', '?')}"}), 400
+
         connection = str(b.get("connection", b.get("jlink_name_or_ip", "usb"))).strip()
         if connection.lower() in ("usb", "none", ""):
             connection = "usb"
-        if _is_loopback_host(connection):
-            return jsonify({
-                "ok": False,
-                "error": "Do not use 127.0.0.1/localhost as a scenario connection. Use 'usb' or the USB adapter serial number."
-            }), 400
-
-        if connection != "usb":
-            adapter = adapter_by_host.get(connection) or adapter_by_serial.get(connection)
-        else:
-            board_id = str(b.get("board", "")).strip()
-            adapter = None
-            if board_id:
-                # Try to match by board type
-                norm_id = re.sub(r"^BRD", "", board_id, flags=re.IGNORECASE).upper()
-                for a in adapters_data:
-                    for ab in a.get("boards", []):
-                        for field in ["id", "shortLabel"]:
-                            val = ab.get(field, "")
-                            if re.sub(r"^BRD", "", val, flags=re.IGNORECASE).upper() == norm_id:
-                                adapter = a
-                                break
-                        if adapter:
-                            break
-                    if adapter:
-                        break
-            # No board_id or no match by type → pick first available adapter
-            if not adapter and adapters_data:
-                adapter = adapters_data[0]
-            # If the chosen adapter is reachable via a real external IP, use it
-            # 127.0.0.1 means the board is local (USB) — keep connection=usb
-            if adapter:
-                adapter_host = adapter.get("host", "").strip()
-                if adapter_host and adapter_host != "127.0.0.1":
-                    connection = adapter_host
-
-        if not adapter:
-            return jsonify({"ok": False, "error": f"No adapter found for board entry {b.get('board', '?')}"}), 400
+        # A usb board resolved to a network adapter uses its IP; 127.0.0.1 means
+        # local (USB) — keep connection=usb.
+        if connection == "usb":
+            adapter_host = (adapter.get("host") or "").strip()
+            if adapter_host and adapter_host != "127.0.0.1":
+                connection = adapter_host
 
         bc = dict(b)
         bc["_resolved_serial"] = adapter.get("serialNumber")
