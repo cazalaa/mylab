@@ -426,9 +426,14 @@ async function sc2SaveAs() {
 async function sc2Check() {
     if (!sc2Scenario) return;
 
-    // Pre-check for duplicates before sending to server
+    // Pre-check for duplicates before sending to server.
+    // 'usb'/'none'/'' mean auto-pick from the pool (not a fixed adapter
+    // identity), so several of them are allowed — only real serial/IP
+    // connections must be unique.
     const boards = sc2Scenario.boards || [];
-    const conns  = boards.map(b => (b.connection||"").trim()).filter(Boolean);
+    const conns  = boards
+        .map(b => (b.connection||"").trim())
+        .filter(c => c && !["usb","none"].includes(c.toLowerCase()));
     const nicks  = boards.map(b => (b.nickname||"").trim()).filter(Boolean);
     const dupConn = conns.filter((v,i) => conns.indexOf(v) !== i);
     const dupNick = nicks.filter((v,i) => nicks.indexOf(v) !== i);
