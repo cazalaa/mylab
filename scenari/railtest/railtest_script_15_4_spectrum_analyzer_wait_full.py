@@ -120,7 +120,7 @@ def script(board):
     board.config_vcom(line_ending="CRLF", echo=True, prompt=">")
     board.reset()
     board.delay(1)
-
+    board.show_terminal("graph")
     board.print("--- init 2.4GHz 802.15.4 spectrumAnalyzer RSSI scan ---")
 
     board.cli("rx 0", timeout=COMMAND_TIMEOUT_S)

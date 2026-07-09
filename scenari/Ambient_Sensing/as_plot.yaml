@@ -1,7 +1,17 @@
 boards:
-  - board: DK2606A Rev. A01
+  - board: 2606A
     connection: '440353134'
+    s37_files:
+      - as_sensor_2606.s37
     script: as_plot.py
-    masserase: false
+    masserase: true
     halt_reset: false
     open_terminal: true
+  - board: 2606A
+    connection: '440353041'
+    s37_files:
+      - as_rf_source_2606.s37
+    script: as_source.py
+    masserase: true
+    halt_reset: false
+    open_terminal: false

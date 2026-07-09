@@ -295,501 +295,498 @@ tr:nth-child(even) td { background: #f8fafd; }
 section { scroll-margin-top: 0; }
 </style>
 </head>
+
 <body>
 
 <div class="layout">
 
-<!-- ── Sidebar ── -->
 <aside class="sidebar">
   <div class="sidebar-brand">
     <h1>My Lab</h1>
     <p>User Guide · v1.0</p>
   </div>
   <nav>
-    <div class="nav-section">Installation</div>
-    <a href="#prerequisites">Prerequisites</a>
-    <a href="#install-steps">Installation steps</a>
-    <a href="#configuration">Configuration</a>
-    <a href="#launch">Launch scripts</a>
+    <div class="nav-section">1 · Install</div>
+    <a href="#install">Install</a>
+    <a href="#config">Configuration</a>
+    <a href="#launch">Launch</a>
 
-    <div class="nav-section">Application</div>
+    <div class="nav-section">2 · Application</div>
     <a href="#overview">Overview</a>
-    <a href="#sdm">SDM</a>
     <a href="#maintenance">Maintenance</a>
-    <a href="#groups" class="sub">Groups</a>
     <a href="#manual-control">Manual Control</a>
     <a href="#scenario-control">Scenario Control</a>
+    <a href="#create-scenario">Create a Scenario</a>
 
-    <div class="nav-section">Scripting</div>
-    <a href="#scenario-yaml">Scenario YAML</a>
-    <a href="#global-script">Global script</a>
-    <a href="#board-script">Board script</a>
+    <div class="nav-section">3 · Scripting</div>
+    <a href="#scenario-file">Scenario Files</a>
+    <a href="#global-script">Global Script</a>
+    <a href="#board-script">Individual Board Script</a>
+    <a href="#sync">Synchronization</a>
+    <a href="#plots">Plots &amp; Graphs</a>
+
+    <div class="nav-section">Annex</div>
+    <a href="#examples">Script Examples</a>
+    <a href="#graph-examples">Graph Examples</a>
   </nav>
 </aside>
 
-<!-- ── Main ── -->
 <main class="main">
 
-<!-- Cover -->
 <div class="cover">
   <h1>My Lab</h1>
-  <p>Manage your adapter desk, maintain your boards, and automate repetitive actions with Python scripts</p>
-  <div class="version">v1.0 · 2026 · Installation · Operation · Scripting</div>
+  <p>Maintain lab boards, organize demo setups, control boards manually, and automate tests with scenarios.</p>
+  <div class="version">v1.0 · pycommander-based · Installation · Application · Scripting</div>
 </div>
 
-<!-- ══════════════════════════════ CHAPTER 1 ══════════════════════════════ -->
-<section id="installation">
-<h2>1 — Installation</h2>
+<section id="install">
+<h2>1 — Install</h2>
+<p>My Lab is installed through the platform launcher. The launcher creates or updates the local runtime environment, installs the Python dependencies, and prepares the application for use. There is no separate manual Python installation flow to follow in this guide.</p>
 
-<h3 id="prerequisites">Prerequisites</h3>
-<p>Ensure the following are available on the host machine before proceeding:</p>
-<ul>
-  <li><strong>Python 3.10 or later</strong> — verify with <code>python3 --version</code></li>
-  <li><strong>Simplicity Device Manager (SDM)</strong> — provided by Silicon Labs SLT or Simplicity Studio</li>
-  <li><strong>Simplicity Commander</strong> — provided by the Simplicity Commander package</li>
-</ul>
-<div class="note"><strong>ℹ</strong> My Lab auto-detects both binaries under <code>~/.silabs/</code>. Manual paths can be set in <code>config.ini</code> if auto-detection fails.</div>
+<h3 id="install-steps">Installation command</h3>
+<table>
+  <thead><tr><th>Platform</th><th>Command</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>macOS / Linux</td><td><code>./mylab.sh --install</code></td><td>Install or update the local application environment.</td></tr>
+    <tr><td>Windows</td><td><code>mylab.bat --install</code></td><td>Install or update the local application environment.</td></tr>
+  </tbody>
+</table>
 
-<h3 id="install-steps">Installation Steps</h3>
-<p><strong>Step 1</strong> — Unzip the archive:</p>
-<div class="code-block"><pre>unzip Archive_clean.zip
-cd projet</pre></div>
+<div class="note"><strong>Note</strong> On macOS or Linux, run <code>chmod +x mylab.sh</code> once if the shell script is not executable.</div>
 
-<p><strong>Step 2</strong> — Create a virtual environment (recommended):</p>
-<div class="code-block"><pre><span class="c"># macOS / Linux</span>
-python3 -m venv .venv
-source .venv/bin/activate
+<h3 id="config">Configuration</h3>
+<p><code>config.ini</code> only contains application settings. It does not need a paths section. Board discovery and board access are handled by pycommander and the application runtime.</p>
+<div class="code-block"><pre>[server]
+host = 127.0.0.1
+web_port = 8080
+</pre></div>
 
-<span class="c"># Windows</span>
-python3 -m venv .venv
-.venv\Scripts\activate</pre></div>
+<table>
+  <thead><tr><th>Setting</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>host</td><td>Local host used by the web application.</td></tr>
+    <tr><td>web_port</td><td>Local Flask port used by the embedded application window.</td></tr>
+  </tbody>
+</table>
 
-<p><strong>Step 3</strong> — Install Python dependencies:</p>
-<div class="code-block"><pre>pip install -r requirements.txt</pre></div>
-
-<p><strong>Step 4</strong> — Install the platform-specific pywebview backend:</p>
-<div class="code-block"><pre><span class="c"># macOS</span>
-pip install pyobjc-framework-WebKit
-
-<span class="c"># Windows</span>
-pip install "pywebview[winforms]"</pre></div>
-
-<h3 id="configuration">Configuration</h3>
-<p>Edit <code>config.ini</code> if auto-detection of SDM or Commander fails:</p>
-<div class="code-block"><pre>[paths]
-sdm       =   <span class="c"># empty = auto-detect in ~/.silabs</span>
-commander =   <span class="c"># empty = auto-detect in ~/.silabs</span>
-
-[server]
-host     = 127.0.0.1
-port     = 3129   <span class="c"># SDM port — do not change</span>
-web_port = 8080   <span class="c"># internal Flask port (configurable)</span></pre></div>
-
-<h3 id="launch">Launch Scripts</h3>
-<p>Platform-specific scripts handle installation, launch, and cleanup:</p>
+<h3 id="launch">Launch commands</h3>
 <table>
   <thead><tr><th>Action</th><th>macOS / Linux</th><th>Windows</th></tr></thead>
   <tbody>
-    <tr><td>Install venv + dependencies</td><td>./mylab.sh --install</td><td>mylab.bat --install</td></tr>
-    <tr><td>Launch the application</td><td>./mylab.sh</td><td>mylab.bat</td></tr>
-    <tr><td>Launch with traces</td><td>./mylab.sh --traces</td><td>mylab.bat --traces</td></tr>
-    <tr><td>Clean logs and groups</td><td>./mylab.sh --clean</td><td>mylab.bat --clean</td></tr>
+    <tr><td>Launch the application</td><td><code>./mylab.sh</code></td><td><code>mylab.bat</code></td></tr>
+    <tr><td>Launch with traces</td><td><code>./mylab.sh --traces</code></td><td><code>mylab.bat --traces</code></td></tr>
+    <tr><td>Clean generated logs and groups</td><td><code>./mylab.sh --clean</code></td><td><code>mylab.bat --clean</code></td></tr>
   </tbody>
 </table>
-<div class="note"><strong>ℹ</strong> On macOS, run <code>chmod +x mylab.sh</code> once before the first launch. By default all console output is silent — use <code>--traces</code> to enable logging.</div>
+<p>Use traces when debugging adapter detection, VCOM traffic, script execution, or plot updates. The clean command removes generated working data and should be used only when you intentionally want to reset local lab state.</p>
 </section>
 
-<!-- ══════════════════════════════ CHAPTER 2 ══════════════════════════════ -->
 <section id="overview">
 <h2>2 — Application Overview</h2>
-<p>My Lab is a desktop application (Python · Flask · SocketIO · pywebview) that provides a unified interface for managing Silicon Labs development boards via USB or Ethernet. Four sections are accessible from the top navigation bar.</p>
+<p>My Lab is a desktop application for daily lab work with Silicon Labs boards. It is built around three needs: keep boards usable, organize boards into repeatable demo or test groups, and automate operations that are too repetitive or too timing-sensitive to run by hand.</p>
 
-<div class="figure">
-  <img src="img/img_topbar.png" alt="My Lab navigation bar">
-  <figcaption>Figure 1 — My Lab navigation bar: SDM, Maintenance, Manual Control, Scenario Control</figcaption>
+<p>The application is based on pycommander for adapter discovery, board reset, VCOM resolution, and board access. The UI is intentionally organized around lab workflows rather than low-level tools.</p>
+
+<div class="card">
+  <p><strong>Maintenance</strong> keeps the lab fleet in a known good state: find available boards, select the boards to work on, erase or recover boards, upgrade adapters, and save useful sets as groups.</p>
+  <p><strong>Manual Control</strong> gives direct access to one or more boards: open a terminal, erase flash, reset a board, send CLI commands manually, or run a small script against a selected board.</p>
+  <p><strong>Scenario Control</strong> automates a complete test, demo, or measurement flow: select boards, assign per-board scripts, add a global script, run everything, synchronize steps, and collect outputs or graphs.</p>
 </div>
-
-<p>The application starts as a compact collapsed bar. Clicking any tab expands the window to reveal the corresponding page. SDM is started automatically at launch — stale Silink instances from previous sessions are cleaned up by a stop/start cycle.</p>
-</section>
-
-<section id="sdm">
-<h2>SDM</h2>
-<p>The SDM tab opens the Simplicity Device Manager web interface embedded in the application. It lists all connected adapters with their nickname, board model, serial number, and connection type (USB or Ethernet IP). The Refresh button rescans for newly connected boards.</p>
-
-<div class="figure">
-  <img src="img/img_sdm.png" alt="SDM interface">
-  <figcaption>Figure 2 — SDM showing a connected EFR32MG12 board at 192.168.0.94</figcaption>
-</div>
-<div class="note"><strong>ℹ</strong> The SDM tab is informational only. Use Maintenance or Manual Control to act on boards.</div>
 </section>
 
 <section id="maintenance">
 <h2>Maintenance</h2>
-<p>The Maintenance page handles fleet-level operations. The <strong>Available</strong> panel lists all adapters detected by SDM. The <strong>Selected</strong> panel holds boards chosen for action. Move boards by drag-and-drop or via Select All. A <strong>My Desk</strong> toggle filters to USB-only adapters.</p>
+<p>The Maintenance page is the starting point when preparing a lab bench. It lists the detected adapters and lets you build a selected set of boards for bulk operations.</p>
 
 <div class="figure">
   <img src="img/img_maintenance.png" alt="Maintenance page">
-  <figcaption>Figure 3 — Maintenance: available boards (left), selected panel with action buttons (right)</figcaption>
+  <figcaption>Maintenance page with available boards, selected boards, and action buttons.</figcaption>
 </div>
 
-<h3>Group Management</h3>
-<ul>
-  <li><strong>Save Group</strong> — save the current selection under a name (stores serial, type, IP, nickname, board ID)</li>
-  <li><strong>Load Group</strong> — restore a previously saved selection</li>
-  <li><strong>Delete Group</strong> — permanently remove a saved group</li>
-</ul>
+<h3>Typical maintenance workflow</h3>
+<ol>
+  <li>Refresh the available board list.</li>
+  <li>Select the boards you want to prepare.</li>
+  <li>Run the needed maintenance action: erase, recover, or adapter upgrade.</li>
+  <li>Save the selection as a group when the same set will be reused for a demo, test bench, or measurement setup.</li>
+</ol>
 
-<h3>Board Actions</h3>
-<p>Three buttons in the Selected panel header act on all selected boards simultaneously and in parallel:</p>
-<table>
-  <thead><tr><th>Button</th><th>Commander Command</th><th>Description</th></tr></thead>
-  <tbody>
-    <tr><td>Chip Erase</td><td>device masserase</td><td>Full chip mass erase</td></tr>
-    <tr><td>Chip Recover</td><td>device recover</td><td>Recovers a locked or bricked chip</td></tr>
-    <tr><td>Board Upgrade</td><td>adapter fwupgrade</td><td>Upgrades the J-Link adapter firmware</td></tr>
-  </tbody>
-</table>
-
-<h3 id="groups">Groups — Uses &amp; Benefits</h3>
-<p>
-    A group is a saved, named set of adapters. Once created from the Maintenance page's Selected panel,
-    a group can be reused across the application in several ways:
-</p>
+<h3>Groups</h3>
+<p>A group is a named set of boards. Groups are useful when the same physical setup is reused frequently: one group for a demo kit, one for a measurement bench, one for a regression setup, or one per developer desk.</p>
 <ul>
-    <li><strong>Maintenance filtering</strong> — Load Group restores the exact selection into the Selected panel so you can run Chip Erase, Chip Recover, or Board Upgrade on that set in one click.</li>
-    <li><strong>Manual Control filtering</strong> — the source selector in Manual Control lists all saved groups; picking one shows only those adapters' cards, keeping your workspace focused.</li>
-    <li><strong>Scenario creation</strong> — when editing a scenario in Scenario Control, the <em>From group</em> button imports the group's adapters as board entries, pre-filling nickname, board type, and IP address automatically.</li>
+  <li><strong>Save Group</strong> stores the current selected boards.</li>
+  <li><strong>Load Group</strong> restores the same board set later.</li>
+  <li><strong>Delete Group</strong> removes a group that is no longer needed.</li>
 </ul>
-<p>
-    Groups are therefore a central organisation tool: create one group per demo setup, one per test bench,
-    or one per team member's desk. This lets you switch context instantly — load a different group and
-    every page reflects the right set of boards without reconfiguring anything manually.
-</p>
-<div class="note"><strong>ℹ</strong> When you re-save a group after a board's details change (nickname, IP, board type), the new data is stored and will be used the next time the group is imported into a scenario.</div>
-<div class="note"><strong>ℹ</strong> USB boards use <code>--serialno &lt;serial&gt;</code>, Ethernet boards use <code>--ip &lt;address&gt;</code> automatically.</div>
+<p>Groups are also used by Manual Control and Scenario Control to filter boards or quickly create scenario board entries.</p>
 </section>
 
 <section id="manual-control">
 <h2>Manual Control</h2>
-<p>The Manual Control page provides direct hardware control per board. A source selector filters by group or shows all boards. Each card shows serial number, nickname, board model, and connection address.</p>
+<p>Manual Control is used when you want to interact with boards directly. It is designed for quick experiments, board bring-up, manual erase/reset operations, and ad-hoc CLI checks before creating a repeatable scenario.</p>
 
 <div class="figure">
   <img src="img/img_manual.png" alt="Manual Control page">
   <figcaption>Figure 4 — Manual Control: board card with Cli and Reset buttons</figcaption>
 </div>
-
+<h3>Selector</h3>
 <ul>
+  <li><strong>All available</strong> — show all adapters</li>
+  <li><strong>Only my desk</strong> — source filter showing USB-only adapters</li>
+  <li><strong>Group name</strong> — show only adapters in that group</li>
+</ul>
+<h3>Adapter card Buttons</h3>
+<ul>
+  <li><strong>Erase</strong> — Erase the chip</li>
+  <li><strong>Flash</strong> — Flash the selected s37 to the target (via pycommander)</li>
   <li><strong>Cli</strong> — opens a terminal window (VCOM)</li>
   <li><strong>Reset</strong> — MCU reset of the board target (via pycommander)</li>
   <li><strong>Only my desk</strong> — source filter showing USB-only adapters</li>
 </ul>
 
-<p>The terminal window shows the <strong>VCOM</strong> console for CLI commands. A <strong>Reset MCU</strong> button is available at the bottom of the terminal.</p>
-
-<h3>Display modes</h3>
-<p>The terminal supports two display modes, configurable in <code>config.ini</code> under <code>[server]</code>:</p>
-<pre>terminal_mode = modern   <span class="c"># or: classic</span></pre>
-
-<p><strong>Classic mode</strong> renders raw serial output in a standard terminal emulator (xterm), identical to a direct serial console.</p>
+<h3>Terminal view</h3>
+<p>The terminal window shows the <strong>VCOM</strong> console for CLI commands. A <strong>Reset MCU</strong> button is available at the bottom of the terminal. You can also call a script from this window.</p>
 
 <div class="figure">
   <img src="img/img_terminal.png" alt="Terminal — Classic mode">
-  <figcaption>Figure 5a — Terminal: Classic mode</figcaption>
+  <figcaption>Figure 5 — Terminal: Classic mode</figcaption>
 </div>
 
-<p><strong>Modern mode</strong> (default) parses the serial stream into a structured timeline. Each command is shown as a collapsible block with its response. Spontaneous events from the board are grouped and displayed separately with a ⚡ icon. Single-line responses are displayed inline without requiring any interaction.</p>
 
-<div class="figure">
-  <img src="img/img_terminal_modern.png" alt="Terminal — Modern mode">
-  <figcaption>Figure 5b — Terminal: Modern mode — commands, responses, and events on a timeline</figcaption>
-</div>
+<p>Manual Control is intentionally individual. Use it to validate one board or a small subset. Once the sequence is stable, move it into Scenario Control so it can be repeated reliably.</p>
 </section>
 
 <section id="scenario-control">
 <h2>Scenario Control</h2>
-<p>Scenario Control enables automated multi-board test execution using YAML scenario files paired with Python scripts.</p>
+<p>Scenario Control is the automation layer. A scenario describes which boards are involved, which script runs on each board, and optionally which global script orchestrates the full flow.</p>
 
 <div class="figure">
   <img src="img/img_script.png" alt="Scenario Control page">
-  <figcaption>Figure 6 — Scenario Control: scenario browser (left), structured sections editor (right)</figcaption>
+  <figcaption>Scenario Control page for selecting, editing, and running automation scenarios.</figcaption>
 </div>
 
-<h3>Toolbar</h3>
+<p>Scenarios are useful for:</p>
 <ul>
-  <li><strong>Load</strong> — select an existing scenario; the right panel shows collapsible sections (Global Script + one per board) that can be expanded and edited inline</li>
-  <li><strong>Create</strong> — start a new scenario with the same structured sections view, pre-populated with one global script entry and one board</li>
-  <li><strong>Check</strong> — validate the scenario against connected boards; reports errors and warnings</li>
-  <li><strong>Run</strong> — execute the scenario (enabled after a successful Check)</li>
+  <li>automated demos that need several boards to start in a controlled order;</li>
+  <li>test flows that reset boards, configure CLIs, transmit traffic, and check results;</li>
+  <li>measurements that collect values over time and display live graphs;</li>
+  <li>repeatable maintenance operations that go beyond a simple erase or reset.</li>
 </ul>
-
-<h3>Run Panel</h3>
-<p>When a scenario runs, the Run panel appears: left 1/3 shows a status card per board (erasing → flashing → connecting → running → done/error); right 2/3 shows a timestamped log.</p>
-
-<div class="figure">
-  <img src="img/img_runpanel.png" alt="Run panel">
-  <figcaption>Figure 7 — Run panel: board status cards (left), script output log (right)</figcaption>
-</div>
 </section>
 
+<section id="create-scenario">
+<h2>Create a Scenario</h2>
+<p>A scenario can be created from the UI or directly as files in the <code>scenari/</code> directory. The usual flow is:</p>
+<ol>
+  <li>Create a new scenario folder.</li>
+  <li>Add or import boards. The <em>From group</em> action is the fastest way to start from a saved board group.</li>
+  <li>Assign a nickname to each board when the script needs stable names such as <code>tx</code>, <code>rx</code>, <code>dut</code>, or <code>sniffer</code>.</li>
+  <li>Attach an individual board script to each board that needs local actions.</li>
+  <li>Add a global script when the flow needs orchestration across boards.</li>
+  <li>Run the scenario and inspect the run panel, terminal output, logs, and graphs.</li>
+</ol>
+<h3>Scenario file</h3>
+<p>A scenario is described by a YAML file. It may contain a global script and a list of boards. Each board entry can reference its own individual script.</p>
+<div class="code-block"><pre>script: global_script.py
+boards:
+  - nickname: tx
+    board: BRD4187C
+    connection: '440012345'
+    script: tx_board.py
+    open_terminal: true
 
-<!-- ══════════════════════════════ CHAPTER 3 ══════════════════════════════ -->
-<section id="scripting">
-<h2>3 — Scripting Reference</h2>
-<p>My Lab scripts are standard Python files executed during a scenario run. The YAML scenario file is the entry point — it declares which boards to flash, which scripts to run, and how everything connects together.</p>
-</section>
+  - nickname: rx
+    board: BRD4187C
+    connection: '440067890'
+    script: rx_board.py
+    open_terminal: true</pre></div>
 
-<section id="scenario-yaml">
-<h2>Scenario YAML</h2>
-<p>YAML files in <code>scenari/</code> (or subdirectories). The scenario file organises everything: it references the global script, the per-board configuration, firmware files, and individual board scripts. All fields are optional except <code>boards:</code>.</p>
-
-<h3>Complete Example</h3>
-<div class="code-block"><pre><span class="c"># scenario_rf_test.yaml</span>
-
-<span class="c"># Optional global orchestration script</span>
-<span class="k">script</span>: global_script.py
-
-<span class="k">boards</span>:
-  - <span class="k">nickname</span>: <span class="s">"tx"</span>              <span class="c"># used with scenario.board("tx")</span>
-    <span class="k">board</span>: <span class="s">"4162A"</span>              <span class="c"># board type for USB auto-matching</span>
-    <span class="k">connection</span>: 192.168.0.94   <span class="c"># IP address, "usb", or empty</span>
-    <span class="k">s37_files</span>:
-      - rail_soc_railtest_4162A.s37
-    <span class="k">script</span>: railtest_script.py
-    <span class="k">masserase</span>: <span class="k">true</span>
-    <span class="k">halt_reset</span>: <span class="k">false</span>
-    <span class="k">open_terminal</span>: <span class="k">true</span>
-
-  - <span class="k">nickname</span>: <span class="s">"rx"</span>
-    <span class="k">board</span>: <span class="s">"2705A"</span>
-    <span class="k">connection</span>:                 <span class="c"># empty = auto-detect USB</span>
-    <span class="k">s37_files</span>:
-      - rail_soc_railtest_2705A.s37
-    <span class="k">script</span>: railtest_script.py
-    <span class="k">masserase</span>: <span class="k">true</span>
-    <span class="k">open_terminal</span>: <span class="k">false</span></pre></div>
-
-<h3>Field Reference</h3>
 <table>
-  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
   <tbody>
-    <tr><td>script (root)</td><td>string</td><td>Optional global script filename. Empty or omit to disable.</td></tr>
-    <tr><td>nickname</td><td>string</td><td>Board ID for scenario.board() calls. Falls back to SDM nickname.</td></tr>
-    <tr><td>board</td><td>string</td><td>Board type for USB auto-matching (e.g. 4162A). BRD prefix optional.</td></tr>
-    <tr><td>connection</td><td>string</td><td>IP for Ethernet. Empty or "usb" for auto-detected USB.</td></tr>
-    <tr><td>s37_files</td><td>list</td><td>.s37 files to flash, relative to the scenario directory.</td></tr>
-    <tr><td>masserase</td><td>bool</td><td>Full chip erase before flash. Default: true.</td></tr>
-    <tr><td>halt_reset</td><td>bool</td><td>Hold in reset after flash. Default: false.</td></tr>
-    <tr><td>open_terminal</td><td>bool</td><td>Auto-open terminal after connect. Default: false.</td></tr>
+    <tr><td>script</td><td>Global script for the scenario. Optional.</td></tr>
+    <tr><td>boards</td><td>List of board entries in run order.</td></tr>
+    <tr><td>nickname</td><td>Stable name used by scripts, for example <code>scenario.board("tx")</code>.</td></tr>
+    <tr><td>board</td><td>Board type or board label used for user readability.</td></tr>
+    <tr><td>connection</td><td>Adapter serial number or connection identifier (jlink serial number).</td></tr>
+    <tr><td>script</td><td>Individual script to run for this board. Optional.</td></tr>
+	<tr><td>mass_erase</td><td>When true, erase the chip before flashing.</td></tr>
+	<tr><td>halt_reset</td><td>When true, maintain reset line after flash to give release control to the script(s).</td></tr>
+    <tr><td>open_terminal</td><td>When true, opens a terminal window during the run.</td></tr>
   </tbody>
 </table>
-
-<h3>Execution Flow</h3>
-<p>When a scenario runs, My Lab executes these phases in order:</p>
-<ol>
-  <li><strong>Flash phase</strong> — all boards are erased and flashed in parallel</li>
-  <li><strong>Connect phase</strong> — all boards are connected (VCOM) in parallel</li>
-  <li><strong>Script phase</strong> — if a global script exists, it runs and is responsible for launching board scripts; otherwise all board scripts run in parallel directly</li>
-</ol>
-
-<h3>Scenario Check</h3>
-<p>Always run <strong>Check</strong> before <strong>Run</strong>. The checker validates:</p>
-<ul>
-  <li>Script files exist and have valid Python syntax</li>
-  <li>All <code>.s37</code> firmware files exist in the scenario directory</li>
-  <li><code>connection</code> is a valid IP, "usb", or empty</li>
-  <li>No duplicate nicknames across boards</li>
-  <li>Board type matches an available adapter (warning only)</li>
-</ul>
-<div class="note"><strong>ℹ</strong> Warnings <span class="badge badge-orange">orange</span> allow the run to proceed. Errors <span class="badge" style="background:#fde8e8;color:#991b1b">red</span> must be resolved first.</div>
 </section>
+<div class="note"><strong>Tip</strong> Start by proving commands in Manual Control. Then copy the sequence into a board script and add global synchronization only when multiple boards need to coordinate.</div>
+</section>
+
+<section id="scenario-file">
+<h2>3 — Scripting</h2>
 
 <section id="global-script">
 <h2>Global Script</h2>
-<p>Declared at root level of the YAML via <code>script:</code>. Must define a <code>script(scenario)</code> function. The global script is the <em>conductor</em> — it decides when board scripts run, can synchronise between boards at named checkpoints, and can send commands to any board directly.</p>
+<p>A global script coordinates the scenario. It must define <code>script(scenario)</code>. Use it when several boards must be reset together, configured in a specific order, synchronized at checkpoints, or queried as a group.</p>
 
-<h3>Timing Diagram</h3>
-<p>The diagram below shows two execution patterns. The top half shows <code>run_board_scripts(wait=True)</code> — the global script blocks until all board scripts finish. The bottom half shows <code>wait=False</code> with checkpoints, allowing the global script to configure boards mid-execution.</p>
-
-<div class="figure">
-  <img src="img/timing.svg" alt="Execution timing diagram" style="background:white; padding:12px; border-radius:12px;">
-  <figcaption>Figure — Execution timing examples: global script orchestration with board scripts and checkpoints</figcaption>
-</div>
-
-<h3>Scenario API</h3>
+<h3>Available global commands</h3>
 <table>
-  <thead><tr><th>Method</th><th>Description</th></tr></thead>
+  <thead><tr><th>Command</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td>scenario.board(id)</td><td>Access board by index (int), serial number, or nickname. Raises ValueError if not found.</td></tr>
-    <tr><td>scenario.boards</td><td>List of all Board objects in YAML order</td></tr>
-    <tr><td>scenario.release_reset()</td><td>Reset all boards simultaneously in parallel</td></tr>
-    <tr><td>scenario.run_board_scripts(wait=True)</td><td>Run per-board scripts in parallel. wait=False returns immediately.</td></tr>
-    <tr><td>scenario.wait_board_scripts()</td><td>Block until all per-board scripts finish</td></tr>
-    <tr><td>scenario.wait_checkpoint(name, serials=None, timeout=30)</td><td>Block until boards reach checkpoint. serials=[] for subset.</td></tr>
-    <tr><td>scenario.cli_all(cmd)</td><td>Same CLI command to all boards in parallel. Returns {nickname: response}.</td></tr>
-    <tr><td>scenario.delay(seconds)</td><td>Sleep for given duration</td></tr>
-    <tr><td>scenario.print(msg)</td><td>Emit message to Run panel as [global]</td></tr>
+    <tr><td>scenario.boards</td><td>Returns the list of board objects in YAML order.</td></tr>
+    <tr><td>scenario.board(id)</td><td>Gets one board by index, serial number, or nickname.</td></tr>
+    <tr><td>scenario.release_reset()</td><td>Resets all boards in parallel.</td></tr>
+    <tr><td>scenario.run_board_scripts(wait=True)</td><td>Runs all configured individual board scripts. With <code>wait=True</code>, the global script blocks until they finish.</td></tr>
+    <tr><td>scenario.wait_board_scripts()</td><td>Waits for individual board scripts launched with <code>wait=False</code>.</td></tr>
+    <tr><td>scenario.wait_checkpoint(name, serials=None, timeout=30.0)</td><td>Waits until all expected boards, or a selected subset, reached a named checkpoint.</td></tr>
+    <tr><td>scenario.cli_all(cmd, timeout=10.0)</td><td>Sends the same CLI command to all boards in parallel and returns a dictionary of responses.</td></tr>
+    <tr><td>scenario.delay(seconds)</td><td>Waits for a number of seconds.</td></tr>
+    <tr><td>scenario.print(msg)</td><td>Prints a message in the run output panel.</td></tr>
   </tbody>
 </table>
-
-<h3>Global Script Template</h3>
-<div class="code-block"><pre><span class="c"># global_script.py</span>
-
-<span class="k">def</span> script(scenario):
-    <span class="c"># Access boards by nickname, serial, or index</span>
-    tx = scenario.board(<span class="s">"tx"</span>)    <span class="c"># by nickname</span>
-    rx = scenario.board(1)       <span class="c"># by index (0-based)</span>
-
-    scenario.print(<span class="s">"=== Test Start ==="</span>)
-
-    <span class="c"># ── Option A: run board scripts and block until all finish ──</span>
-    scenario.run_board_scripts(wait=<span class="k">True</span>)
-    <span class="c"># global resumes here once ALL board scripts are done</span>
-    tx.cli(<span class="s">"tx 10"</span>)
-
-    <span class="c"># ── Option B: run async + checkpoint synchronisation ──</span>
-    scenario.run_board_scripts(wait=<span class="k">False</span>)
-    scenario.wait_checkpoint(<span class="s">"booted"</span>, timeout=15.0)  <span class="c"># wait for all boards</span>
-    tx.cli(<span class="s">"set_mode tx"</span>)    <span class="c"># configure while scripts still run</span>
-    rx.cli(<span class="s">"set_mode rx"</span>)
-    scenario.wait_board_scripts()
-
-    <span class="c"># ── Collect results ──</span>
-    results = scenario.cli_all(<span class="s">"get_stats"</span>)
-    <span class="k">for</span> name, resp <span class="k">in</span> results.items():
-        scenario.print(f<span class="s">"{name}: {resp}"</span>)
-
-    scenario.print(<span class="s">"=== Test Complete ==="</span>)</pre></div>
-
-<h3>Checkpoint Synchronisation</h3>
-<p>Checkpoints let board scripts signal the global script that a milestone has been reached. The global script blocks at <code>wait_checkpoint()</code> until all (or selected) boards have called <code>board.checkpoint(name)</code>.</p>
-<div class="code-block"><pre><span class="c"># In board_script.py:</span>
-board.reset()
-board.delay(1.5)
-board.checkpoint(<span class="s">"booted"</span>)         <span class="c"># signal: this board is ready</span>
-<span class="c"># board script continues independently after signalling...</span>
-board.cli(<span class="s">"run_test"</span>)
-
-<span class="c"># In global_script.py:</span>
-scenario.run_board_scripts(wait=<span class="k">False</span>)
-scenario.wait_checkpoint(<span class="s">"booted"</span>)  <span class="c"># blocks until ALL boards signal</span>
-<span class="c"># now configure both boards simultaneously</span>
-scenario.board(<span class="s">"tx"</span>).cli(<span class="s">"set_mode tx"</span>)
-scenario.board(<span class="s">"rx"</span>).cli(<span class="s">"set_mode rx"</span>)</pre></div>
-<div class="note"><strong>ℹ</strong> <code>scenario.wait_checkpoint(name, serials=["tx","rx"])</code> waits only for the listed boards by nickname or serial. The board script continues running after calling <code>checkpoint()</code> — it is not blocked.</div>
 </section>
 
 <section id="board-script">
-<h2>Board Script</h2>
-<p>Declared in the YAML via <code>script:</code> under a board entry. Must define a <code>script(board)</code> function receiving the Board object. Board scripts run in parallel across all boards — one thread per board.</p>
+<h2>Individual Board Script</h2>
+<p>An individual script runs for one board and must define <code>script(board)</code>. When a scenario launches several board scripts, they run in parallel: one thread per board.</p>
 
-<h3>Board API</h3>
+<h3>Available board commands</h3>
 <table>
-  <thead><tr><th>Method</th><th>Description</th></tr></thead>
+  <thead><tr><th>Command</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td>board.config_vcom(line_ending, echo, prompt)</td><td>Configure VCOM parameters before use</td></tr>
-    <tr><td>board.cli(cmd, timeout=10.0)</td><td>Send CLI command; returns cleaned response (echo + prompt stripped)</td></tr>
-    <tr><td>board.reset(settle=1.0)</td><td>MCU reset via pycommander (device.reset), Commander-CLI fallback; waits <code>settle</code> seconds for boot</td></tr>
-    <tr><td>board.flash(firmware_path, serial=None, ip=None, masserase=True, halt_reset=False)</td><td>Flash a .hex/.s37 firmware file using Simplicity Commander. Connection is auto-detected from board.host (USB if localhost, JLink IP otherwise). Override with <code>serial=</code> for <code>-s</code> or <code>ip=</code> for <code>--ip</code>. With <code>masserase=True</code> a <code>device masserase</code> is run first (this is how erase is done from a script). Returns True on success.</td></tr>
-    <tr><td>board.delay(seconds)</td><td>Sleep for given duration</td></tr>
-    <tr><td>board.print(msg)</td><td>Emit message to Run panel as [board:nickname]</td></tr>
-    <tr><td>board.checkpoint(name)</td><td>Signal named sync point to the global script (non-blocking)</td></tr>
-    <tr><td>board.serial</td><td>Serial number string (read-only)</td></tr>
-    <tr><td>board.nickname</td><td>Nickname from YAML or adapter (read-only)</td></tr>
+    <tr><td>board.config_vcom(line_ending="CRLF", echo=True, prompt="&gt;")</td><td>Configures CLI line ending, echo behavior, and prompt detection.</td></tr>
+    <tr><td>board.wait_vcom_ready(timeout=5.0, settle=0.2)</td><td>Waits until the VCOM channel is open and quiet enough to receive commands.</td></tr>
+    <tr><td>board.cli(cmd, timeout=10.0)</td><td>Sends a CLI command and returns the cleaned response.</td></tr>
+    <tr><td>board.read(timeout=1.0, pattern=None)</td><td>Reads spontaneous VCOM output without sending a command. Optionally stops when a regex pattern appears.</td></tr>
+    <tr><td>board.write_cli(data)</td><td>Writes raw CLI data to the VCOM channel.</td></tr>
+    <tr><td>board.read_cli(timeout=2.0)</td><td>Reads raw VCOM data with a timeout.</td></tr>
+    <tr><td>board.reset(settle=1.0)</td><td>Resets the target MCU and waits for the settle time.</td></tr>
+    <tr><td>board.flash(firmware_path, serial=None, ip=None, masserase=True, halt_reset=False)</td><td>Flashes firmware. By default, mass erase is performed first.</td></tr>
+    <tr><td>board.delay(seconds)</td><td>Waits for a number of seconds.</td></tr>
+    <tr><td>board.sync(idle=0.3, timeout=3.0)</td><td>Waits until the VCOM output has been quiet for the requested idle time.</td></tr>
+    <tr><td>board.checkpoint(name)</td><td>Signals a named milestone to the global script. This call does not block the board script.</td></tr>
+    <tr><td>board.show_terminal(view="cli")</td><td>Opens or focuses the board terminal. Use <code>view="graph"</code> to show the plot pane.</td></tr>
+    <tr><td>board.print(msg)</td><td>Prints a message in the run output panel.</td></tr>
+    <tr><td>board.plot.show(fig)</td><td>Displays a full Plotly figure specification or a Plotly figure object.</td></tr>
+    <tr><td>board.plot.extend(ys, x=None, traces=None, maxpoints=None)</td><td>Appends live data points to an existing graph.</td></tr>
+    <tr><td>board.plot.clear()</td><td>Clears the graph pane.</td></tr>
+    <tr><td>board.serial</td><td>Read-only board serial number.</td></tr>
+    <tr><td>board.nickname</td><td>Read-only scenario nickname.</td></tr>
+  </tbody>
+</table>
+</section>
+
+<section id="sync">
+<h2>Synchronization Methods</h2>
+<p>Scripts can be synchronized in several ways depending on how strict the timing needs to be.</p>
+
+<table>
+  <thead><tr><th>Method</th><th>Use when</th><th>Behavior</th></tr></thead>
+  <tbody>
+    <tr><td>Sequential global code</td><td>Only one global operation should happen at a time.</td><td>Commands run in the order written in <code>script(scenario)</code>.</td></tr>
+    <tr><td>scenario.release_reset()</td><td>All boards must reset together.</td><td>Resets all boards in parallel.</td></tr>
+    <tr><td>scenario.run_board_scripts(wait=True)</td><td>The global script must wait until all board scripts are complete.</td><td>Blocking call.</td></tr>
+    <tr><td>scenario.run_board_scripts(wait=False)</td><td>Board scripts should continue while the global script performs orchestration.</td><td>Non-blocking call; use <code>wait_board_scripts()</code> later.</td></tr>
+    <tr><td>board.checkpoint(name) + scenario.wait_checkpoint(name)</td><td>The global script must wait until boards reach a named point such as <code>booted</code>, <code>ready</code>, or <code>measured</code>.</td><td>Board scripts signal progress; the global script waits for all boards or a subset.</td></tr>
+    <tr><td>board.sync()</td><td>A board script must avoid racing the last CLI response or boot output.</td><td>Waits until VCOM is quiet for a short idle period.</td></tr>
+    <tr><td>board.wait_vcom_ready()</td><td>The first command after connection or reset may otherwise be sent too early.</td><td>Waits for the VCOM transport and a quiet settle window.</td></tr>
   </tbody>
 </table>
 
-<h4>board.flash() examples</h4>
-<div class="code-block"><pre>board.flash(<span class="s">"/path/to/firmware.hex"</span>)                  <span class="c"># auto connection</span>
-board.flash(<span class="s">"/path/to/firmware.hex"</span>, serial=<span class="s">"440012345"</span>) <span class="c"># force -s</span>
-board.flash(<span class="s">"/path/to/firmware.hex"</span>, ip=<span class="s">"192.168.1.100"</span>) <span class="c"># force --ip</span>
-board.flash(<span class="s">"/path/to/firmware.hex"</span>, masserase=<span class="k">False</span>)     <span class="c"># skip erase</span>
-board.flash(<span class="s">"/path/to/firmware.hex"</span>, halt_reset=<span class="k">True</span>)     <span class="c"># hold CPU halted</span></pre></div>
-
-<h3>Real-World Example — IEEE 802.15.4 TX Test</h3>
-<div class="code-block"><pre><span class="k">import</span> time
-<span class="k">from</span> random <span class="k">import</span> randint
-
-<span class="k">def</span> script(board):
-    board.config_vcom(line_ending=<span class="s">"CRLF"</span>, echo=<span class="k">True</span>, prompt=<span class="s">">"</span>)
-
-    board.reset()
-    board.delay(1.5)  <span class="c"># wait for board to fully boot</span>
-
-    <span class="c"># --- IEEE 802.15.4 2.4 GHz Init ---</span>
-    board.print(<span class="s">"--- init 2.4GHz 802.15.4 ---"</span>)
-    board.cli(<span class="s">"rx 0"</span>)
-    board.cli(<span class="s">"config2p4GHz802154"</span>)
-    board.cli(<span class="s">"enable802154 rx 100 192 1000"</span>)
-    board.cli(<span class="s">"configTxOptions 1"</span>)
-
-    <span class="c"># --- Set TX Payload (26-byte 802.15.4 frame) ---</span>
-    board.print(<span class="s">"--- load payload ---"</span>)
-    board.cli(<span class="s">"setTxLength 26"</span>)
-    board.cli(<span class="s">"setTxPayload 0 0x1b 0x61 0x98 0x00 0x34 0x12 0x44 0x33 0x55 0x44"</span>)
-    board.cli(<span class="s">"setTxPayload 10 0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09"</span>)
-    board.cli(<span class="s">"setTxPayload 20 0x0a 0x0b 0x0c 0x0d 0x0e 0x0f"</span>)
-
-    <span class="c"># --- Transmit via CLI ---</span>
-    board.print(<span class="s">"--- send 1 packet using CLI ---"</span>)
-    board.cli(<span class="s">"tx 1"</span>)</pre></div>
-
-<h3>Working with Responses</h3>
-<p>Board scripts are standard Python — the full Python standard library is available. Board CLI responses use the format <code>{{key:value}}</code> and can be processed with any Python technique:</p>
-
-<div class="code-block"><pre><span class="k">import</span> re
-
-<span class="c"># ── Using re.search — extract a single value ──</span>
-resp = board.cli(<span class="s">"getchannel"</span>)
-match = re.search(r<span class="s">"channel:(\d+)"</span>, resp)
-channel = <span class="k">int</span>(match.group(1)) <span class="k">if</span> match <span class="k">else</span> <span class="k">None</span>
-board.print(f<span class="s">"Channel: {channel}"</span>)
-
-<span class="c"># ── Using re.findall — parse all key:value pairs into a dict ──</span>
-resp = board.cli(<span class="s">"get_stats"</span>)
-pairs = re.findall(r<span class="s">"\{([^{}]+)\}"</span>, resp)
-data = <span class="k">dict</span>(p.split(<span class="s">":"</span>, 1) <span class="k">for</span> p <span class="k">in</span> pairs <span class="k">if</span> <span class="s">":"</span> <span class="k">in</span> p)
-board.print(f<span class="s">"Transmitted: {data.get('transmitted', '?')}"</span>)
-board.print(f<span class="s">"Failed: {data.get('failed', '?')}"</span>)
-
-<span class="c"># ── Any Python logic is valid — loops, conditions, assertions ──</span>
-<span class="k">for</span> channel <span class="k">in</span> [11, 15, 20, 25]:
-    board.cli(f<span class="s">"setchannel {channel}"</span>)
-    resp = board.cli(<span class="s">"tx 10"</span>)
-    board.print(f<span class="s">"ch{channel}: {resp.strip()}"</span>)
-
-<span class="c"># ── Import standard library modules as needed ──</span>
-<span class="k">import</span> time, json
-<span class="k">from</span> random <span class="k">import</span> randint
-
-<span class="c"># ── Use assertions to fail the script on unexpected results ──</span>
-resp = board.cli(<span class="s">"getchannel"</span>)
-<span class="k">assert</span> <span class="s">"channel:11"</span> <span class="k">in</span> resp, f<span class="s">"Unexpected channel: {resp}"</span></pre></div>
-<div class="note"><strong>ℹ</strong> <code>board.cli()</code> automatically strips the command echo and trailing prompt. Since scripts are pure Python, you can use any standard library: <code>re</code>, <code>json</code>, <code>time</code>, <code>math</code>, <code>csv</code>, etc. Any unhandled exception marks the board as <span class="badge" style="background:#fde8e8;color:#991b1b">error</span> in the Run panel.</div>
-
 <div class="figure">
-  <img src="img/img_output.png" alt="Run output">
-  <figcaption>Figure 8 — Run output: [global] and [board:name] timestamped log from board.print() and scenario.print()</figcaption>
+  <img src="img/timing.svg" alt="Execution timing diagram" style="background:white; padding:12px; border-radius:12px;">
+  <figcaption>Global orchestration, parallel board scripts, and checkpoint synchronization.</figcaption>
 </div>
 </section>
 
-</main>
+<section id="plots">
+<h2>Plots &amp; Graphs</h2>
+<p>Every board has a graph pane in its terminal window. Scripts can push Plotly figure specifications directly from Python. This supports live measurements, dashboards, quick visual checks, and demo visuals without adding UI code to the application.</p>
 
+<h3>Graph workflow</h3>
+<ol>
+  <li>Open the terminal graph pane with <code>board.show_terminal("graph")</code>.</li>
+  <li>Create an initial figure with <code>board.plot.show({...})</code>.</li>
+  <li>Append live data with <code>board.plot.extend(...)</code>, or redraw the full figure with another <code>show()</code>.</li>
+  <li>Use <code>board.plot.clear()</code> before starting a new visualization.</li>
+</ol>
+
+<table>
+  <thead><tr><th>Plot command</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>board.plot.show(fig)</td><td>Renders a complete Plotly figure. <code>fig</code> can be a plain dictionary or an object with <code>to_json()</code>.</td></tr>
+    <tr><td>board.plot.extend(ys, x=None, traces=None, maxpoints=None)</td><td>Appends values to one or more traces. Use <code>maxpoints</code> to keep a rolling window.</td></tr>
+    <tr><td>board.plot.clear()</td><td>Clears the plot area.</td></tr>
+  </tbody>
+</table>
+
+<div class="note"><strong>Note</strong> Values sent to the graph must be JSON-serializable because the graph is rendered by the browser.</div>
+
+<div class="figure">
+  <img src="img/img_terminal_graph.png" alt="graph" style="background:white; padding:12px; border-radius:12px;">
+  <figcaption>Graph display example</figcaption>
+</div>
+<div class="figure">
+  <img src="img/img_terminal_plot.png" alt="plot" style="background:white; padding:12px; border-radius:12px;">
+  <figcaption>Plot display example</figcaption>
+</div>
+</section>
+
+<section id="examples">
+<h2>Annex — Basic Script Examples</h2>
+
+<h3>Minimal board script</h3>
+<div class="code-block"><pre># board_basic.py
+
+def script(board):
+    board.config_vcom(line_ending="CRLF", echo=True, prompt="&gt;")
+    board.wait_vcom_ready()
+    board.print("Board script started")
+    response = board.cli("version")
+    board.print(response)
+</pre></div>
+
+<h3>Erase and flash firmware</h3>
+<div class="code-block"><pre># flash_board.py
+
+def script(board):
+    board.print("Flashing application")
+    ok = board.flash("firmware/app.hex", masserase=True)
+    if ok:
+        board.reset(settle=1.5)
+        board.print("Flash complete")
+    else:
+        board.print("Flash failed")
+</pre></div>
+
+<h3>Global script: run board scripts, then query all boards</h3>
+<div class="code-block"><pre># global_script.py
+
+def script(scenario):
+    scenario.print("Resetting boards")
+    scenario.release_reset()
+
+    scenario.print("Running board scripts")
+    scenario.run_board_scripts(wait=True)
+
+    scenario.print("Collecting versions")
+    results = scenario.cli_all("version")
+    for name, response in results.items():
+        scenario.print(f"{name}: {response}")
+</pre></div>
+
+<h3>Checkpoint example</h3>
+<div class="code-block"><pre># tx_board.py or rx_board.py
+
+def script(board):
+    board.reset(settle=1.0)
+    board.wait_vcom_ready()
+    board.cli("init")
+    board.checkpoint("ready")
+    board.cli("run")
+
+# global_script.py
+
+def script(scenario):
+    scenario.run_board_scripts(wait=False)
+    if scenario.wait_checkpoint("ready", timeout=20):
+        scenario.print("All boards are ready")
+        scenario.cli_all("start")
+    scenario.wait_board_scripts()
+</pre></div>
+
+<h3>Subset checkpoint</h3>
+<div class="code-block"><pre>def script(scenario):
+    scenario.run_board_scripts(wait=False)
+    scenario.wait_checkpoint("rx_ready", serials=["rx"], timeout=15)
+    scenario.board("tx").cli("tx 100")
+    scenario.wait_board_scripts()
+</pre></div>
+</section>
+
+<section id="graph-examples">
+<h2>Annex — Graph Examples</h2>
+
+<h3>Simple live line graph</h3>
+<div class="code-block"><pre># graph_line.py
+import math
+import time
+
+def script(board):
+    board.show_terminal("graph")
+    board.plot.show({
+        "data": [{"type": "scatter", "mode": "lines", "name": "signal", "x": [], "y": []}],
+        "layout": {"title": {"text": "Live signal"},
+                   "xaxis": {"title": {"text": "t (s)"}},
+                   "yaxis": {"title": {"text": "value"}}}
+    })
+
+    t0 = time.time()
+    while time.time() - t0 &lt; 10:
+        t = time.time() - t0
+        y = math.sin(2 * math.pi * 0.5 * t)
+        board.plot.extend([y], x=round(t, 3), traces=[0], maxpoints=200)
+        time.sleep(0.05)
+</pre></div>
+
+<h3>Bar graph from CLI results</h3>
+<div class="code-block"><pre># graph_channels.py
+
+def script(board):
+    board.show_terminal("graph")
+    channels = [11, 12, 13, 14, 15]
+    counts = []
+
+    for ch in channels:
+        board.cli(f"setchannel {ch}")
+        response = board.cli("measure")
+        # Replace this parsing with the format returned by your firmware.
+        counts.append(int(response.strip() or "0"))
+
+    board.plot.show({
+        "data": [{"type": "bar", "x": [f"ch{c}" for c in channels], "y": counts}],
+        "layout": {"title": {"text": "Measurement by channel"}}
+    })
+</pre></div>
+
+<h3>Two live traces</h3>
+<div class="code-block"><pre># graph_two_traces.py
+import time
+
+def script(board):
+    board.show_terminal("graph")
+    board.plot.show({
+        "data": [
+            {"type": "scatter", "mode": "lines", "name": "RSSI", "x": [], "y": []},
+            {"type": "scatter", "mode": "lines", "name": "Temperature", "x": [], "y": []}
+        ],
+        "layout": {"title": {"text": "Live measurement"}}
+    })
+
+    t0 = time.time()
+    while time.time() - t0 &lt; 30:
+        t = round(time.time() - t0, 2)
+        rssi = float(board.cli("get_rssi").strip() or "0")
+        temp = float(board.cli("get_temp").strip() or "0")
+        board.plot.extend([rssi, temp], x=t, traces=[0, 1], maxpoints=300)
+        time.sleep(1)
+</pre></div>
+</section>
+
+</main>
 </div>
 
-<!-- Active nav highlight on scroll -->
 <script>
-const sections = document.querySelectorAll('section[id], h2[id], h3[id]');
-const links    = document.querySelectorAll('.sidebar nav a');
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) {
-      links.forEach(l => l.classList.remove('active'));
-      const link = document.querySelector(`.sidebar nav a[href="#${e.target.id}"]`);
-      if (link) link.classList.add('active');
-    }
-  });
-}, { rootMargin: '-10% 0px -80% 0px' });
-sections.forEach(s => observer.observe(s));
+const links = document.querySelectorAll('.sidebar nav a');
+const sections = [...document.querySelectorAll('section[id]')];
+
+function setActive() {
+  const y = window.scrollY + 120;
+  let current = sections[0]?.id;
+  for (const section of sections) {
+    if (section.offsetTop <= y) current = section.id;
+  }
+  links.forEach(link => link.classList.toggle('active', link.getAttribute('href') === '#' + current));
+}
+window.addEventListener('scroll', setActive);
+setActive();
 </script>
 
 </body>

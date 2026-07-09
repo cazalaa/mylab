@@ -93,7 +93,7 @@ def script(board):
     # Keep this if you want to restart the board app before the test.
     board.reset()
     board.delay(1)
-
+    board.show_terminal(view="graph")
     board.print("--- setting motion idle time to 3000 ms ---")
     board.cli("ai_sensing_set_motion_idle_time 3000")
 
