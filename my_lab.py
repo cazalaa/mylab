@@ -2085,7 +2085,7 @@ class Plot:
     def show(self, fig):
         self._ck()
         spec = json.loads(fig.to_json()) if hasattr(fig, "to_json") else fig
-        socketio.emit("plot_figure", spec, room=self._room)
+        socketio.emit("plot_figure", {"room": self._room, "fig": spec}, room=self._room)
         socketio.sleep(0)
 
     def extend(self, ys, x=None, traces=None, maxpoints=None):
@@ -2093,12 +2093,13 @@ class Plot:
         if traces is None:
             traces = list(range(len(ys)))
         socketio.emit("plot_extend",
-                      {"ys": ys, "x": x, "traces": traces, "maxpoints": maxpoints},
+                      {"room": self._room, "ys": ys, "x": x,
+                       "traces": traces, "maxpoints": maxpoints},
                       room=self._room)
         socketio.sleep(0)
 
     def clear(self):
-        socketio.emit("plot_clear", {}, room=self._room)
+        socketio.emit("plot_clear", {"room": self._room}, room=self._room)
         socketio.sleep(0)
 
 

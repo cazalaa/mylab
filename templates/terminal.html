@@ -868,8 +868,15 @@ function graphReveal() {
     ensureGraphDiv().style.display = "block";
 }
 
-socket.on("plot_figure", function (spec) {
+// Plots are addressed to a specific board's room — render only ours, so a
+// per-board (or global scenario.board(i)) plot never leaks onto another
+// board's terminal.
+var myVcomRoom = serial + "_vcom";
+
+socket.on("plot_figure", function (msg) {
+    if (msg && msg.room && msg.room !== myVcomRoom) return;
     if (!window.Plotly) return;
+    var spec = (msg && msg.fig) ? msg.fig : (msg || {});
     var gd = ensureGraphDiv();
     graphReveal();
     Plotly.react(gd, spec.data || [], spec.layout || {},
@@ -879,6 +886,7 @@ socket.on("plot_figure", function (spec) {
 });
 
 socket.on("plot_extend", function (d) {
+    if (d && d.room && d.room !== myVcomRoom) return;
     if (!window.Plotly || !graphInited) return;   // ignore extends before a figure
     var gd = ensureGraphDiv();
     var update = { y: d.ys.map(function (v) { return [v]; }) };
@@ -889,7 +897,8 @@ socket.on("plot_extend", function (d) {
     Plotly.extendTraces(gd, update, d.traces, max);
 });
 
-socket.on("plot_clear", function () {
+socket.on("plot_clear", function (d) {
+    if (d && d.room && d.room !== myVcomRoom) return;
     if (!window.Plotly) return;
     Plotly.purge(ensureGraphDiv());
     graphInited = false;
