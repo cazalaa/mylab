@@ -1147,6 +1147,8 @@ def api_jslog():
         f.write(f"[{ts}] {msg}\n")
     print(f"[JSLOG] {msg}")
     return jsonify({"ok": True})
+    
+@app.route("/api/adapter/<serial>/erase", methods=["POST"])
 def adapter_erase(serial):
     """Mass erase a single board from Manual Control."""
     s, ip = _serial_ip(serial)

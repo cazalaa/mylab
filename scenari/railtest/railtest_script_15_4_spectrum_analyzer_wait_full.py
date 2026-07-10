@@ -4,6 +4,7 @@ import re
 # IEEE 802.15.4 2.4 GHz channels
 START_CH = 11
 END_CH = 26
+# NOTE: remember to change MAX_NUMBER_CHANNELS as well as CHANNEL_HOPPING_BUFFER_SIZE (app_common.h) in the RAILTest application, to allow channel hopping over all the 16 channels.
 CHANNELS = list(range(START_CH, END_CH + 1))
 SCAN_SECONDS = 60.0
 COMMAND_TIMEOUT_S = 1.5
@@ -125,7 +126,7 @@ def script(board):
 
     board.cli("rx 0", timeout=COMMAND_TIMEOUT_S)
     board.cli("config2p4GHz802154", timeout=COMMAND_TIMEOUT_S)
-    board.cli("setNotification 0", timeout=COMMAND_TIMEOUT_S)
+    board.cli("setNotifications 0", timeout=COMMAND_TIMEOUT_S)
 
     rssi_by_channel = {ch: None for ch in CHANNELS}
     show_spectrum(board, CHANNELS, rssi_by_channel, 0, 0.0)
@@ -158,5 +159,5 @@ def script(board):
 
     finally:
         board.cli("rx 0", timeout=COMMAND_TIMEOUT_S)
-        board.cli("setNotification 1", timeout=COMMAND_TIMEOUT_S)
+        board.cli("setNotifications 1", timeout=COMMAND_TIMEOUT_S)
         board.print("--- spectrumAnalyzer RSSI scan done ---")
