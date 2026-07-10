@@ -1,4 +1,3 @@
-import subprocess
 import time
 import configparser
 import os
@@ -35,80 +34,29 @@ WIN_EXPANDED   = 700   # hauteur dépliée
 # ----------------------------
 # BINRESOLVE (intégré)
 # ----------------------------
-_SILABS_ROOT    = Path.home() / ".silabs"
-_IS_WINDOWS     = sys.platform == "win32"
-_IS_MAC         = sys.platform == "darwin"
-_COMMANDER_NAME = "commander.exe" if _IS_WINDOWS else "commander"
-
-# Chemins fallback par plateforme (utilisés uniquement si auto-détection échoue)
-if _IS_WINDOWS:
-    _DEFAULT_COMMANDER = str(Path.home() / "AppData/Local/silabs/Commander/commander.exe")
-elif _IS_MAC:
-    _DEFAULT_COMMANDER = str(Path.home() / ".silabs/slt/installs/archive/Commander.app/Contents/MacOS/commander")
-else:  # Linux
-    _DEFAULT_COMMANDER = str(Path.home() / ".silabs/slt/installs/archive/commander-linux-x64/commander")
-
-def _is_exec(p: str) -> bool:
-    pp = Path(p)
-    if not pp.exists():
-        return False
-    if _IS_WINDOWS:
-        return True
-    return os.access(str(pp), os.X_OK)
-
-def _find_in_silabs(name: str) -> str | None:
-    if not _SILABS_ROOT.exists():
-        return None
-    candidates = sorted(_SILABS_ROOT.rglob(name), key=lambda p: p.stat().st_mtime, reverse=True)
-    for candidate in candidates:
-        if _is_exec(str(candidate)):
-            print(f"[INFO] {name} trouvé via ~/.silabs : {candidate}")
-            return str(candidate)
-    return None
-
-def resolve_commander(path: str | None) -> str | None:
-    if path and _is_exec(path):
-        return path
-    envp = os.environ.get("COMMANDER_BIN")
-    if envp and _is_exec(envp):
-        return envp
-    if _is_exec(_DEFAULT_COMMANDER):
-        return _DEFAULT_COMMANDER
-    p = shutil.which("commander")
-    if p and _is_exec(p):
-        return p
-    return _find_in_silabs(_COMMANDER_NAME)
+_IS_WINDOWS = sys.platform == "win32"
 
 CONFIG_FILE = "config.ini"
 ALLOWED_PAGES = {"maintenance", "manual_control", "script_control"}
 
 # ----------------------------
-# CONFIG + AUTO RESOLVE
+# CONFIG
 # ----------------------------
+# Commander is no longer invoked directly: flashing/erasing/reset/recover and
+# enumeration all go through the pycommander package, which locates the embedded
+# Simplicity Commander itself. config.ini therefore needs no [paths] section.
 config = configparser.ConfigParser()
 config.read(CONFIG_FILE)
 
-COMMANDER_PATH = resolve_commander(config["paths"].get("commander"))
-
-# On ne sauvegarde que si un chemin était absent du config et vient d'être auto-détecté
-_save_needed = False
-if COMMANDER_PATH and not config["paths"].get("commander"):
-    config["paths"]["commander"] = COMMANDER_PATH
-    _save_needed = True
-
-if _save_needed:
-    with open(CONFIG_FILE, "w") as f:
-        config.write(f)
-
-HOST = config["server"].get("host", "127.0.0.1")
-PORT = config["server"].get("port", "3129")
-WEB_PORT = int(config["server"].get("web_port", "8080"))
+HOST = config.get("server", "host", fallback="127.0.0.1")
+PORT = config.get("server", "port", fallback="3129")
+WEB_PORT = int(config.get("server", "web_port", fallback="8080"))
 
 # Terminal parser config
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from parsers import get_parser, format_block
-TERMINAL_PARSER  = config["server"].get("parser",           "auto").strip().lower()
-TERMINAL_PRETTY  = config["server"].get("terminal_pretty",  "true").strip().lower() == "true"
+TERMINAL_PARSER  = config.get("server", "parser",          fallback="auto").strip().lower()
+TERMINAL_PRETTY  = config.get("server", "terminal_pretty", fallback="true").strip().lower() == "true"
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -152,29 +100,6 @@ def _kit_cached(serial):
 # COMMANDER ACTIONS
 # ----------------------------
 
-def run_commander(cmd, serial):
-    try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        invalidate_connections(serial)
-        return {"serialNumber": serial, "ok": True, "output": result.stdout}
-    except subprocess.CalledProcessError as e:
-        invalidate_connections(serial)
-        return {"serialNumber": serial, "ok": False, "error": e.stderr or str(e)}
-    except Exception as e:
-        invalidate_connections(serial)
-        return {"serialNumber": serial, "ok": False, "error": str(e)}
-
-
-def _conn_flag(serial):
-    """Commander connection flag for a serial, from pycommander enumeration:
-    --serialno (USB) or --ip <addr> (IP). Returns (flag_list, "usb"|"ip")."""
-    a  = {x["serial"]: x for x in pyc_list_adapters()}.get(str(serial))
-    ip = (a or {}).get("ip")
-    if ip:
-        return ["--ip", ip], "ip"
-    return ["--serialno", str(serial)], "usb"
-
-
 def _adapters_compat():
     """pycommander adapters in the legacy {serialNumber, host, nickname, boards}
     shape consumed by the scenario validator/resolver. `boards` now carries the
@@ -194,30 +119,13 @@ def _adapters_compat():
 
 
 def reset_mcu(serial):
-    """Reset the target MCU via pycommander `device reset` (Commander-CLI
-    fallback). Independent of any admin console — works on USB and IP.
-    Returns (ok: bool, msg: str). Single source of truth for MCU reset, used by
-    both the Reset button route and Board.reset()."""
-    flag, _ = _conn_flag(serial)              # ["--serialno", s] or ["--ip", ip]
-    ip = flag[1] if flag[0] == "--ip" else None
-    if _PYC_OK:
-        try:
-            res = _pyc(serial=None if ip else serial, ip=ip).device.reset()
-            ok  = bool(res.get("success")) if isinstance(res, dict) else bool(res)
-            print(f"[RST-MCU] {serial} via pycommander: {'ok' if ok else res}")
-            return ok, ("" if ok else str(res))
-        except Exception as e:
-            print(f"[RST-MCU] {serial} pycommander error ({e}); CLI fallback")
-    try:
-        r = subprocess.run([COMMANDER_PATH, "device", "reset"] + flag,
-                           capture_output=True, text=True, timeout=30)
-        ok  = r.returncode == 0
-        msg = (r.stdout if ok else r.stderr).strip()
-        print(f"[RST-MCU] {serial} via CLI: {'ok' if ok else msg}")
-        return ok, msg
-    except Exception as e:
-        print(f"[RST-MCU] {serial} error: {e}")
-        return False, str(e)
+    """Reset the target MCU via pycommander `device reset`. Works on USB and IP
+    (no admin console needed). Returns (ok, msg). Single source of truth for MCU
+    reset, used by both the Reset button route and Board.reset()."""
+    s, ip = _serial_ip(serial)
+    ok, msg = pyc_reset(serial=s, ip=ip)
+    print(f"[RST-MCU] {serial}: {'ok' if ok else msg}")
+    return ok, msg
 
 
 @app.route("/mass_erase", methods=["POST"])
@@ -225,10 +133,11 @@ def mass_erase():
     adapters = request.json.get("adapters", [])
 
     def erase(a):
-        cmd = [COMMANDER_PATH, "device", "masserase",
-               "--serialno" if a["connectivityType"] == "usb" else "--ip",
-               a["serialNumber"] if a["connectivityType"] == "usb" else a["host"]]
-        return run_commander(cmd, a["serialNumber"])
+        s   = a["serialNumber"]
+        ip  = a["host"] if a["connectivityType"] != "usb" else None
+        ok, msg = pyc_masserase(serial=None if ip else s, ip=ip)
+        return {"serialNumber": s, "ok": ok, "output": "" if ok else msg,
+                **({} if ok else {"error": msg})}
 
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(erase, a): a for a in adapters}
@@ -242,10 +151,11 @@ def chip_recover():
     adapters = request.json.get("adapters", [])
 
     def recover(a):
-        cmd = [COMMANDER_PATH, "device", "recover",
-               "--serialno" if a["connectivityType"] == "usb" else "--ip",
-               a["serialNumber"] if a["connectivityType"] == "usb" else a["host"]]
-        return run_commander(cmd, a["serialNumber"])
+        s   = a["serialNumber"]
+        ip  = a["host"] if a["connectivityType"] != "usb" else None
+        ok, msg = pyc_recover(serial=None if ip else s, ip=ip)
+        return {"serialNumber": s, "ok": ok, "output": "" if ok else msg,
+                **({} if ok else {"error": msg})}
 
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(recover, a): a for a in adapters}
@@ -260,10 +170,11 @@ def fw_upgrade():
     adapters = request.json.get("adapters", [])
 
     def upgrade(a):
-        cmd = [COMMANDER_PATH, "adapter", "fwupgrade",
-               "-s" if a["connectivityType"] == "usb" else "--ip",
-               a["serialNumber"] if a["connectivityType"] == "usb" else a["host"]]
-        return run_commander(cmd, a["serialNumber"])
+        s   = a["serialNumber"]
+        ip  = a["host"] if a["connectivityType"] != "usb" else None
+        ok, msg = pyc_fwupgrade(serial=None if ip else s, ip=ip)
+        return {"serialNumber": s, "ok": ok, "output": "" if ok else msg,
+                **({} if ok else {"error": msg})}
 
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(upgrade, a): a for a in adapters}
@@ -316,7 +227,7 @@ def _find_usb_tty(serial_number):
 #   - USB : VCOM is the CDC tty reported as kit_info.vcom_port  -> pyserial
 #   - IP  : VCOM is TCP  <ip_address>:IP_VCOM_PORT
 # -----------------------------------------------------------------------------
-IP_VCOM_PORT = int(config["server"].get("ip_vcom_port", "4901"))
+IP_VCOM_PORT = int(config.get("server", "ip_vcom_port", fallback="4901"))
 
 try:
     from pycommander import Commander as _PycCommander
@@ -331,13 +242,66 @@ except Exception as _pyc_ad_e:        # pragma: no cover
     _PycAdapter = None
     print(f"[WARN] pycommander Adapter not available: {_pyc_ad_e}")
 
+try:
+    from pycommander_core.errors import PyCommanderError as _PyCmdError
+except Exception:                     # pragma: no cover
+    _PyCmdError = Exception
+
 
 def _pyc(serial=None, ip=None):
-    return _PycCommander(
-        serial_number=str(serial) if serial else None,
-        ip_address=ip or None,
-        executable_path=Path(COMMANDER_PATH) if COMMANDER_PATH else None,
-    )
+    """Commander bound to exactly ONE identity (network -> ip_address, USB ->
+    serial_number). No executable_path: pycommander locates commander itself."""
+    if ip:
+        return _PycCommander(ip_address=ip)
+    if serial:
+        return _PycCommander(serial_number=str(serial))
+    return _PycCommander()
+
+
+def _serial_ip(serial):
+    """Resolve a serial to (serial, ip) for pycommander: ip set (reach by
+    ip_address) if it's a network adapter, else (serial, None) for USB."""
+    a  = {x["serial"]: x for x in pyc_list_adapters()}.get(str(serial))
+    ip = (a or {}).get("ip")
+    return (None, ip) if ip else (str(serial), None)
+
+
+def _pyc_run(fn, serial=None, ip=None):
+    """Run a pycommander device/adapter/flash operation. pycommander raises a
+    typed exception on failure, so 'no exception' == success. Returns (ok, msg)."""
+    if not _PYC_OK:
+        return False, "pycommander unavailable"
+    try:
+        fn(_pyc(serial=serial, ip=ip))
+        invalidate_connections()      # board state changed → re-probe on next read
+        return True, ""
+    except _PyCmdError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
+
+
+def pyc_flash(path, serial=None, ip=None, halt=False):
+    kw = {"filenames": [str(path)]}
+    if halt:
+        kw["halt"] = True
+    return _pyc_run(lambda c: c.flash.flash(**kw), serial, ip)
+
+
+def pyc_masserase(serial=None, ip=None):
+    return _pyc_run(lambda c: c.device.masserase(), serial, ip)
+
+
+def pyc_reset(serial=None, ip=None):
+    return _pyc_run(lambda c: c.device.reset(), serial, ip)
+
+
+def pyc_recover(serial=None, ip=None):
+    return _pyc_run(lambda c: c.device.recover(), serial, ip)
+
+
+def pyc_fwupgrade(serial=None, ip=None):
+    return _pyc_run(lambda c: c.adapter.fwupgrade(), serial, ip)
 
 
 def _adapter(serial=None, ip=None):
@@ -673,7 +637,7 @@ class TerminalWindowAPI:
 # ── terminal page ──────────────────────────────────
 @app.route("/terminal/<serial>")
 def terminal_page(serial):
-    terminal_mode = config["server"].get("terminal_mode", "modern").strip().lower()
+    terminal_mode = config.get("server", "terminal_mode", fallback="modern").strip().lower()
     return render_template("terminal.html", serial=serial, terminal_mode=terminal_mode)
 
 # ── adapter info endpoint (pour le terminal) ───────
@@ -1185,15 +1149,9 @@ def api_jslog():
     return jsonify({"ok": True})
 def adapter_erase(serial):
     """Mass erase a single board from Manual Control."""
-    try:
-        conn_flag, _ = _conn_flag(serial)
-        cmd = [COMMANDER_PATH, "device", "masserase"] + conn_flag
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        invalidate_connections(serial)
-        ok = result.returncode == 0
-        return jsonify({"ok": ok, "msg": result.stderr.strip() if not ok else ""})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    s, ip = _serial_ip(serial)
+    ok, msg = pyc_masserase(serial=s, ip=ip)
+    return jsonify({"ok": ok, "msg": "" if ok else msg})
 
 
 @app.route("/api/adapter/<serial>/flash", methods=["POST"])
@@ -1202,15 +1160,9 @@ def adapter_flash(serial):
     path = request.json.get("path", "")
     if not path or not os.path.isfile(path):
         return jsonify({"ok": False, "error": "file not found"}), 400
-    try:
-        conn_flag, _ = _conn_flag(serial)
-        cmd = [COMMANDER_PATH, "flash", path] + conn_flag
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        invalidate_connections(serial)
-        ok = result.returncode == 0
-        return jsonify({"ok": ok, "msg": result.stderr.strip() if not ok else ""})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    s, ip = _serial_ip(serial)
+    ok, msg = pyc_flash(path, serial=s, ip=ip)
+    return jsonify({"ok": ok, "msg": "" if ok else msg})
 
 
 @app.route("/api/adapter/<serial>/reset-mcu", methods=["POST"])
@@ -2357,18 +2309,19 @@ class Board:
             print(f"[FLASH] ERROR: file not found: {firmware_path}")
             return False
 
-        # Resolve connection flag
+        # Resolve the pycommander identity (serial_number OR ip_address)
         if serial:
-            conn_flag = ["-s", serial]
+            tgt_serial, tgt_ip = serial, None
         elif ip:
-            conn_flag = ["--ip", ip]
+            tgt_serial, tgt_ip = None, ip
         elif self.host in ("127.0.0.1", "localhost", "::1"):
-            conn_flag = ["-s", self.serial]
+            tgt_serial, tgt_ip = self.serial, None
         else:
-            conn_flag = ["--ip", self.host]
+            tgt_serial, tgt_ip = None, self.host
 
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        print(f"[FLASH] {self.nickname or self.serial} {ts} {firmware_path} conn={conn_flag}")
+        print(f"[FLASH] {self.nickname or self.serial} {ts} {firmware_path} "
+              f"target={tgt_ip or tgt_serial}")
 
         vcom_room = f"{self.serial}_vcom"
 
@@ -2381,30 +2334,17 @@ class Board:
                 "detail": None, "cmd": None, "boot_id": None, "boot_first": False,
             }, room=vcom_room)
 
-        def _run(cmd):
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                if r.returncode != 0:
-                    _emit(f"Flash error: {r.stderr.strip() or r.stdout.strip()}")
-                    return False
-                return True
-            except subprocess.TimeoutExpired:
-                _emit("Flash timeout after 120s")
-                return False
-            except Exception as e:
-                _emit(f"Flash exception: {e}")
-                return False
-
         if masserase:
             _emit(f"Erasing {self.nickname or self.serial}...")
-            if not _run([COMMANDER_PATH, "device", "masserase"] + conn_flag):
+            ok, msg = pyc_masserase(serial=tgt_serial, ip=tgt_ip)
+            if not ok:
+                _emit(f"Erase error: {msg}")
                 return False
 
         _emit(f"Flashing {_os.path.basename(firmware_path)}...")
-        cmd = [COMMANDER_PATH, "flash", firmware_path] + conn_flag
-        if halt_reset:
-            cmd += ["--halt"]
-        if not _run(cmd):
+        ok, msg = pyc_flash(firmware_path, serial=tgt_serial, ip=tgt_ip, halt=halt_reset)
+        if not ok:
+            _emit(f"Flash error: {msg}")
             return False
 
         _emit(f"Flash complete — {_os.path.basename(firmware_path)}")
@@ -2516,15 +2456,15 @@ def _flash_board(board_cfg, scenario_dir, run_id=None):
         connection = "usb"
     print(f"[RUN] _flash_board serial={serial} connection={connection}")
 
-    # Build commander connection flag
+    # Resolve the pycommander identity (serial_number OR ip_address)
     parts = connection.split(".")
     is_ip = len(parts) == 4 and all(p.isdigit() for p in parts)
     if connection == "usb":
-        conn_flag = ["-s", serial]
+        tgt_serial, tgt_ip = serial, None
     elif is_ip:
-        conn_flag = ["--ip", connection]
+        tgt_serial, tgt_ip = None, connection
     else:
-        conn_flag = ["-s", connection]
+        tgt_serial, tgt_ip = connection, None
 
     log = []
 
@@ -2536,36 +2476,22 @@ def _flash_board(board_cfg, scenario_dir, run_id=None):
                           {"serial": serial, "status": status, "msg": msg},
                           room=run_room)
 
-    def run_cmd(cmd):
-        print(f"[RUN] running: {' '.join(cmd)}")
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            invalidate_connections(serial)
-            log.append(" ".join(cmd))
-            print(f"[RUN] returncode={result.returncode} stdout={result.stdout[:100]} stderr={result.stderr[:100]}")
-            if result.returncode != 0:
-                log.append(f"ERROR: {result.stderr.strip()}")
-                return False
-            return True
-        except subprocess.TimeoutExpired:
-            log.append(f"ERROR: timeout after 60s")
-            return False
-        except Exception as e:
-            log.append(f"ERROR: {e}")
-            return False
-
     if board_cfg.get("masserase", True):
         emit_status("erasing")
-        if not run_cmd([COMMANDER_PATH, "device", "masserase"] + conn_flag):
+        ok, msg = pyc_masserase(serial=tgt_serial, ip=tgt_ip)
+        log.append(f"masserase {tgt_ip or tgt_serial}")
+        if not ok:
+            log.append(f"ERROR: {msg}")
             return False, log
 
     for s37 in board_cfg.get("s37_files", []):
         s37_path = os.path.join(scenario_dir, s37)
         emit_status("flashing")
-        cmd = [COMMANDER_PATH, "flash", s37_path] + conn_flag
-        if board_cfg.get("halt_reset", False):
-            cmd += ["--halt"]
-        if not run_cmd(cmd):
+        ok, msg = pyc_flash(s37_path, serial=tgt_serial, ip=tgt_ip,
+                            halt=board_cfg.get("halt_reset", False))
+        log.append(f"flash {os.path.basename(s37_path)}")
+        if not ok:
+            log.append(f"ERROR: {msg}")
             return False, log
 
     print(f"[RUN] _flash_board done serial={serial}")
