@@ -100,13 +100,35 @@ body {
     border-color: #1a1a1a; 
 }
 
+/* Maintenance refresh — round ⟳ icon button, homogeneous with Manual Control */
 #refreshBtn {
-    min-width: 70px;
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    text-align: center;
+    font-size: 16px;
+    line-height: 1;
+    background: #EFF2F9;
+    color: #6E7F8D;
+    cursor: pointer;
+    box-shadow:
+        -4px -4px 8px rgba(250, 251, 255, 1),
+         4px  4px 8px rgba(22, 27, 29, 0.23);
 }
+#refreshBtn:hover  { color: #4a5a68; }
+#refreshBtn:active {
+    box-shadow:
+        inset -3px -3px 6px rgba(250, 251, 255, 1),
+        inset  3px  3px 6px rgba(22, 27, 29, 0.23);
+}
+#refreshBtn.spinning { animation: test-spin .8s linear infinite; }
 
-#refreshBtn, #allBtn, #eraseBtn, #fwBtn {
+#allBtn, #eraseBtn, #fwBtn {
     min-width: 90px;
     justify-content: center;
     text-align: center;

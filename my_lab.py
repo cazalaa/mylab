@@ -57,6 +57,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from parsers import get_parser, format_block
 TERMINAL_PARSER  = config.get("server", "parser",          fallback="auto").strip().lower()
 TERMINAL_PRETTY  = config.get("server", "terminal_pretty", fallback="true").strip().lower() == "true"
+SCAN_INTERVAL    = int(config.get("server", "scan_interval", fallback="15"))   # background adapter scan period (s)
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -405,28 +406,31 @@ def _board_id_from_info(serial, ip=None):
     return board_id
 
 
-def pyc_list_adapters():
-    """USB + network adapter enumeration via pycommander.
+def pyc_list_adapters(usb=True, net=True):
+    """USB and/or network adapter enumeration via pycommander.
 
     Returns a list of {serial, ip, nickname, connectivity}. `ip` is None for USB.
+    `net=False` skips the (slow) network scan.
     """
     out = []
     if not _PYC_OK:
         return out
-    try:
-        for u in (_pyc().listAvailableAdapters(list_usb_adapters=True) or []):
-            if u.jlink_serial_number:
-                out.append({"serial": str(u.jlink_serial_number), "ip": None,
-                            "nickname": u.nickname or "", "connectivity": "usb"})
-    except Exception as e:
-        print(f"[WARN] pyc usb list: {e}")
-    try:
-        for n in (_pyc().listAvailableAdapters(list_network_adapters=True) or []):
-            if n.jlink_serial_number:
-                out.append({"serial": str(n.jlink_serial_number), "ip": n.ip_address,
-                            "nickname": n.nickname or "", "connectivity": "ip"})
-    except Exception as e:
-        print(f"[WARN] pyc net list: {e}")
+    if usb:
+        try:
+            for u in (_pyc().listAvailableAdapters(list_usb_adapters=True) or []):
+                if u.jlink_serial_number:
+                    out.append({"serial": str(u.jlink_serial_number), "ip": None,
+                                "nickname": u.nickname or "", "connectivity": "usb"})
+        except Exception as e:
+            print(f"[WARN] pyc usb list: {e}")
+    if net:
+        try:
+            for n in (_pyc().listAvailableAdapters(list_network_adapters=True) or []):
+                if n.jlink_serial_number:
+                    out.append({"serial": str(n.jlink_serial_number), "ip": n.ip_address,
+                                "nickname": n.nickname or "", "connectivity": "ip"})
+        except Exception as e:
+            print(f"[WARN] pyc net list: {e}")
     return out
 
 
@@ -543,22 +547,16 @@ def delete_group(name):
     if os.path.exists(path):
         os.remove(path)
     return jsonify({"ok": True})
-@app.route("/scan", methods=["POST"])
-def scan():
-    clear_and_scan()
-    return "OK"
-
-@app.route("/adapters")
-def adapters():
+def _build_adapters(usb=True, net=True):
+    """Enumerate adapters (USB and/or network) and enrich each with its board id
+    and kit info — the shape consumed by the Maintenance/Manual pages."""
     result = []
-    for a in pyc_list_adapters():          # USB + network, via pycommander
+    for a in pyc_list_adapters(usb=usb, net=net):
         serial = a.get("serial")
         if not serial:
             continue
-        # Board number: strictly the AdapterBoardInfo whose target_device is set
-        # (via adapter.info()). No kit-name / prefix fallback — empty if not found.
-        board_id = _board_id_from_info(serial, a.get("ip"))
-        kit = _kit_cached(serial)          # `adapter probe` (cached) — VCOM, kit name…
+        board_id = _board_id_from_info(serial, a.get("ip"))   # AdapterBoardInfo w/ target_device
+        kit = _kit_cached(serial)                             # `adapter probe` (cached)
         result.append({
             "serialNumber":     serial,
             "boardId":          board_id or "Unknown",
@@ -569,7 +567,65 @@ def adapters():
             "nickname":         a.get("nickname", ""),
             "ttyMode":          False,
         })
-    return jsonify(result)
+    return result
+
+
+# Background adapter enumeration ------------------------------------------------
+# A scanner thread refreshes this snapshot every SCAN_INTERVAL seconds. /adapters
+# returns it instantly (no blocking pycommander calls in the request), and pages
+# update live via the 'adapters_updated' socket event. Each scan runs in two
+# phases: USB first (fast, shown immediately), then USB+network (the slow --net).
+_adapters_snapshot = {"adapters": [], "scanning": False, "ts": 0.0}
+_scan_lock = threading.Lock()
+
+def _emit_adapters():
+    socketio.emit("adapters_updated", {
+        "adapters": _adapters_snapshot["adapters"],
+        "scanning": _adapters_snapshot["scanning"],
+    })
+
+def _scan_once():
+    """One two-phase scan. No-op if a scan is already running."""
+    if not _scan_lock.acquire(blocking=False):
+        return
+    try:
+        _adapters_snapshot["scanning"] = True
+        _emit_adapters()
+        # Phase 1 — USB only (fast): publish right away so the list is reactive.
+        _adapters_snapshot["adapters"] = _build_adapters(usb=True, net=False)
+        _emit_adapters()
+        # Phase 2 — full USB + network (slow --net): publish the complete list.
+        _adapters_snapshot["adapters"] = _build_adapters(usb=True, net=True)
+        _adapters_snapshot["ts"] = time.time()
+    except Exception as e:
+        print(f"[SCAN] error: {e}")
+    finally:
+        _adapters_snapshot["scanning"] = False
+        _emit_adapters()
+        _scan_lock.release()
+
+def _scanner_loop():
+    """Periodic background scanner (every SCAN_INTERVAL seconds)."""
+    while True:
+        _scan_once()
+        socketio.sleep(SCAN_INTERVAL)
+
+
+@app.route("/scan", methods=["POST"])
+def scan():
+    clear_and_scan()                               # drop probe/board caches -> fresh read
+    socketio.start_background_task(_scan_once)      # kick an immediate scan, return now
+    return jsonify({"scanning": True})
+
+@app.route("/adapters")
+def adapters():
+    # First ever hit with nothing cached: kick a scan so the page isn't empty forever.
+    if not _adapters_snapshot["ts"] and not _adapters_snapshot["scanning"]:
+        socketio.start_background_task(_scan_once)
+    return jsonify({
+        "adapters": _adapters_snapshot["adapters"],
+        "scanning": _adapters_snapshot["scanning"],
+    })
 
 # ── terminal window API ────────────────────────────
 class WindowAPI:
@@ -2985,6 +3041,10 @@ if __name__ == "__main__":
     )
     t.daemon = True
     t.start()
+
+    # Background adapter enumeration (USB first, then --net), every SCAN_INTERVAL s.
+    socketio.start_background_task(_scanner_loop)
+
     webview.create_window(
         "My Lab",
         f"http://127.0.0.1:{WEB_PORT}",

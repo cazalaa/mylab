@@ -34,11 +34,44 @@ let activePage = null;
 
 window.appState = {
     selected: new Set(),
-    cache: []
+    cache: [],
+    scanning: false
 };
 async function refreshCache() {
     const res = await fetch('/adapters');
-    window.appState.cache = await res.json();
+    const data = await res.json();
+    // /adapters now returns {adapters, scanning} (served from a background scan)
+    window.appState.cache    = (data && data.adapters) || [];
+    window.appState.scanning = !!(data && data.scanning);
+}
+
+// Live updates pushed by the background scanner (USB phase, then --net phase).
+if (window._appSocket) {
+    let _lastAdaptersKey = "";
+    window._appSocket.on("adapters_updated", function (d) {
+        const adapters = (d && d.adapters) || [];
+        const scanning = !!(d && d.scanning);
+        window.appState.cache    = adapters;
+        window.appState.scanning = scanning;
+
+        // Drive the refresh indicators directly by id — robust against the page
+        // hooks being shared globals (only the active page's button is visible).
+        // Both are round ⟳ icon buttons that spin while scanning.
+        const rb = document.getElementById("refreshBtn");        // Maintenance
+        if (rb) rb.classList.toggle("spinning", scanning);
+        const trb = document.getElementById("testRefreshBtn");   // Manual
+        if (trb) trb.classList.toggle("spinning", scanning);
+
+        // Re-render the list only when the adapter set actually changed (avoids
+        // flicker on the periodic scan when nothing has moved).
+        const key = JSON.stringify(adapters);
+        if (key !== _lastAdaptersKey) {
+            _lastAdaptersKey = key;
+            if (typeof window.onAdaptersUpdated === "function") {
+                try { window.onAdaptersUpdated(); } catch (e) {}
+            }
+        }
+    });
 }
 const loadedPages = new Set();
 

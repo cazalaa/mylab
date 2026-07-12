@@ -26,32 +26,47 @@ let testAdapters = [];
 let testSource   = "available";
 
 async function onPageLoad() {
-    // Show whatever we already have instantly, then refresh to the latest
-    // discovery in the background (keeps Manual Control in sync with Maintenance
-    // instead of showing the stale app-start snapshot).
+    // Show whatever we already have instantly, then pull the latest snapshot.
+    // Live background-scan updates keep this in sync with Maintenance.
+    window.onAdaptersUpdated = onAdaptersUpdatedManual;
+    window.onScanState       = syncManualRefreshBtn;
     renderFromSource(testSource);
+    syncManualRefreshBtn();
     await loadAdapters();
 }
 
-// Re-enumerate adapters and refresh the shared cache, then render.
-// deep=true also forces a re-probe (board labels) via /scan, like Maintenance.
-async function loadAdapters(deep = false) {
+// Pushed by the background scanner (USB phase, then --net phase).
+function onAdaptersUpdatedManual() {
+    renderFromSource(testSource);
+    syncManualRefreshBtn();
+}
+
+function syncManualRefreshBtn() {
     const btn = document.getElementById("testRefreshBtn");
-    if (btn) { btn.classList.add("spinning"); btn.disabled = true; }
+    if (!btn) return;
+    btn.classList.toggle("spinning", !!(window.appState && window.appState.scanning));
+}
+
+// Load the current snapshot (served instantly). deep=true first triggers a fresh
+// scan; results stream back over the socket (adapters_updated).
+async function loadAdapters(deep = false) {
     try {
         if (deep) {
+            if (window.appState) window.appState.scanning = true;
+            syncManualRefreshBtn();
             await fetch("/scan", { method: "POST" });
-            await new Promise(r => setTimeout(r, 1200));
         }
-        const res   = await fetch("/adapters");
-        const fresh  = await res.json();
-        if (window.appState) window.appState.cache = fresh;
+        const res  = await fetch("/adapters");
+        const data = await res.json();
+        if (window.appState) {
+            window.appState.cache    = (data && data.adapters) || [];
+            window.appState.scanning = !!(data && data.scanning);
+        }
     } catch (e) {
         console.error("loadAdapters failed:", e);
-    } finally {
-        if (btn) { btn.classList.remove("spinning"); btn.disabled = false; }
     }
     renderFromSource(testSource);
+    syncManualRefreshBtn();
 }
 
 function refreshAdapters() { return loadAdapters(true); }
