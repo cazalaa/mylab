@@ -158,5 +158,5 @@ def script(board):
 
     finally:
         board.cli("rx 0", timeout=COMMAND_TIMEOUT_S)
-        board.cli("setNotification 1", timeout=COMMAND_TIMEOUT_S)
+        board.cli("setNotifications 1", timeout=COMMAND_TIMEOUT_S)
         board.print("--- spectrumAnalyzer RSSI scan done ---")
