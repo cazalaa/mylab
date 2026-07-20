@@ -87,13 +87,17 @@ def get_adapters():
     """USB + network adapters via pycommander (see pyc_list_adapters)."""
     return pyc_list_adapters()
 
-def _kit_cached(serial):
+def _kit_cached(serial, ip=None):
     serial = str(serial)
     if serial not in _probe_cache:
         # IP adapters must be probed by --ip, not --serialno, otherwise the probe
         # returns nothing and kit_part_number (the board number) stays empty.
-        a  = {x["serial"]: x for x in pyc_list_adapters()}.get(serial)
-        ip = (a or {}).get("ip")
+        # Callers that already know the ip (e.g. _build_adapters, which just
+        # enumerated it) should pass it directly to skip a redundant full
+        # pyc_list_adapters() round-trip just to look it up again.
+        if ip is None:
+            a  = {x["serial"]: x for x in pyc_list_adapters()}.get(serial)
+            ip = (a or {}).get("ip")
         _probe_cache[serial] = pyc_kit_info(serial=None if ip else serial, ip=ip)
     return _probe_cache[serial]
 
@@ -416,6 +420,7 @@ def pyc_list_adapters(usb=True, net=True):
     if not _PYC_OK:
         return out
     if usb:
+        t0 = time.time()
         try:
             for u in (_pyc().listAvailableAdapters(list_usb_adapters=True) or []):
                 if u.jlink_serial_number:
@@ -423,7 +428,10 @@ def pyc_list_adapters(usb=True, net=True):
                                 "nickname": u.nickname or "", "connectivity": "usb"})
         except Exception as e:
             print(f"[WARN] pyc usb list: {e}")
+        print(f"[TIMING] listAvailableAdapters(usb) took {time.time() - t0:.2f}s, {len(out)} found")
     if net:
+        t0 = time.time()
+        n_before = len(out)
         try:
             for n in (_pyc().listAvailableAdapters(list_network_adapters=True) or []):
                 if n.jlink_serial_number:
@@ -431,6 +439,7 @@ def pyc_list_adapters(usb=True, net=True):
                                 "nickname": n.nickname or "", "connectivity": "ip"})
         except Exception as e:
             print(f"[WARN] pyc net list: {e}")
+        print(f"[TIMING] listAvailableAdapters(net) took {time.time() - t0:.2f}s, {len(out) - n_before} found")
     return out
 
 
@@ -549,25 +558,44 @@ def delete_group(name):
     return jsonify({"ok": True})
 def _build_adapters(usb=True, net=True):
     """Enumerate adapters (USB and/or network) and enrich each with its board id
-    and kit info — the shape consumed by the Maintenance/Manual pages."""
-    result = []
-    for a in pyc_list_adapters(usb=usb, net=net):
-        serial = a.get("serial")
-        if not serial:
-            continue
-        board_id = _board_id_from_info(serial, a.get("ip"))   # AdapterBoardInfo w/ target_device
-        kit = _kit_cached(serial)                             # `adapter probe` (cached)
-        result.append({
+    and kit info — the shape consumed by the Maintenance/Manual pages.
+
+    Enumeration (pyc_list_adapters) is a single fast call. Enriching each
+    adapter (Adapter.info() for board id + adapter.probe() for kit info) is a
+    real round-trip to that physical card, so on a cold cache (first scan,
+    many IP boards) doing these one at a time in a loop is what's slow —
+    18 boards x ~2s serial ~= 35s. These per-adapter round-trips are
+    independent, so they're parallelized here; already-cached adapters
+    return instantly regardless."""
+    raw = [a for a in pyc_list_adapters(usb=usb, net=net) if a.get("serial")]
+
+    def _enrich(a):
+        serial = a["serial"]
+        ip     = a.get("ip")
+        board_id = _board_id_from_info(serial, ip)   # AdapterBoardInfo w/ target_device
+        kit      = _kit_cached(serial, ip)            # `adapter probe` (cached)
+        return {
             "serialNumber":     serial,
             "boardId":          board_id or "Unknown",
             "boardLabel":       kit.get("kit_name", "") or "",
             "connectivityType": a.get("connectivity", "usb"),
-            "host":             a.get("ip"),
+            "host":             ip,
             "label":            kit.get("kit_name", "") or "",
             "nickname":         a.get("nickname", ""),
             "ttyMode":          False,
-        })
-    return result
+        }
+
+    if not raw:
+        return []
+    with ThreadPoolExecutor(max_workers=min(10, len(raw))) as pool:
+        futures = {pool.submit(_enrich, a): i for i, a in enumerate(raw)}
+        result = [None] * len(raw)
+        for fut, i in futures.items():
+            try:
+                result[i] = fut.result()
+            except Exception as e:
+                print(f"[ADAPTERS] enrich failed for {raw[i].get('serial')}: {e}")
+    return [r for r in result if r is not None]
 
 
 # Background adapter enumeration ------------------------------------------------
@@ -592,10 +620,14 @@ def _scan_once():
         _adapters_snapshot["scanning"] = True
         _emit_adapters()
         # Phase 1 — USB only (fast): publish right away so the list is reactive.
+        t0 = time.time()
         _adapters_snapshot["adapters"] = _build_adapters(usb=True, net=False)
+        print(f"[TIMING] phase1 (usb build_adapters, incl. probe) took {time.time() - t0:.2f}s")
         _emit_adapters()
         # Phase 2 — full USB + network (slow --net): publish the complete list.
+        t0 = time.time()
         _adapters_snapshot["adapters"] = _build_adapters(usb=True, net=True)
+        print(f"[TIMING] phase2 (usb+net build_adapters, incl. probe) took {time.time() - t0:.2f}s")
         _adapters_snapshot["ts"] = time.time()
     except Exception as e:
         print(f"[SCAN] error: {e}")
