@@ -3068,8 +3068,14 @@ if __name__ == "__main__":
     logging.getLogger("engineio").setLevel(log_level)
 
     t = threading.Thread(
-        target=lambda: socketio.run(app, port=WEB_PORT, debug=False,
-                                    use_reloader=False, log_output=TRACES)
+        target=lambda: socketio.run(
+            app,
+            host=HOST,
+            port=WEB_PORT,
+            debug=False,
+            use_reloader=False,
+            log_output=TRACES,
+        )
     )
     t.daemon = True
     t.start()
