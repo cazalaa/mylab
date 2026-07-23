@@ -2,9 +2,12 @@
 # ─────────────────────────────────────────────────────────────
 #  mylab.sh  —  macOS / Linux
 #  Usage :
-#    ./mylab.sh           → lancer l'application
-#    ./mylab.sh --install → créer/réparer le venv et installer les dépendances
-#    ./mylab.sh --clean   → supprimer les logs et les groupes sauvegardés
+#    ./mylab.sh              → lancer l'application (fenêtre native)
+#    ./mylab.sh --install    → créer/réparer le venv et installer les dépendances
+#    ./mylab.sh --clean      → supprimer les logs et les groupes sauvegardés
+#    ./mylab.sh --headless   → lancer sans fenêtre (serveur web seul, ex: Rpi Ubuntu Server)
+#    ./mylab.sh --remote     → alias de --headless
+#    ./mylab.sh --traces     → lancer avec logs verbeux
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -131,9 +134,13 @@ cmd_run() {
 
 # ── dispatch ──────────────────────────────────────────────────
 case "${1:-}" in
-    --install) cmd_install ;;
-    --clean)   cmd_clean   ;;
-    "")        cmd_run     ;;
-    --traces)  cmd_run --traces ;;
-    *)         echo "Usage : ./mylab.sh [--install | --clean | --traces]"; exit 1 ;;
+    --install)          cmd_install ;;
+    --clean)            cmd_clean   ;;
+    "")                 cmd_run     ;;
+    --traces)           cmd_run --traces ;;
+    --headless)         cmd_run --headless ;;
+    --remote)           cmd_run --remote ;;
+    --headless-traces)  cmd_run --headless --traces ;;
+    --remote-traces)    cmd_run --remote --traces ;;
+    *)                  echo "Usage : ./mylab.sh [--install | --clean | --headless | --remote | --traces]"; exit 1 ;;
 esac

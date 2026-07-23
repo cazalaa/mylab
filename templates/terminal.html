@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/static/xterm.min.css">
 <script src="/static/xterm.min.js"></script>
 <script src="/static/socket.io.min.js"></script>
+<script src="/static/upload-fallback.js"></script>
 <!-- Plotly: pinned version required (plotly-latest is frozen at v1.58.5).
      To vendor locally, drop the file in static/ and point src there. -->
 <script src="https://cdn.plot.ly/plotly-3.6.0.min.js" charset="utf-8"></script>
@@ -1003,6 +1004,10 @@ async function pickScript() {
     let path = null;
     if (window.pywebview && window.pywebview.api) {
         path = await window.pywebview.api.pick_file("", ["Python scripts (*.py)", "All files (*.*)"]);
+    } else if (typeof mylabPickFile === "function") {
+        // No native window (remote/headless session) — upload the script
+        // from the browser instead of asking for a server-side path.
+        path = await mylabPickFile("script", ".py");
     } else {
         path = prompt("Script path:");
     }

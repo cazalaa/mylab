@@ -15,16 +15,29 @@ import serial.tools.list_ports
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO, emit, join_room
+from werkzeug.utils import secure_filename
 import socket as sock_module
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import webview
+
+# --headless / --remote: run as a plain web server, no native pywebview
+# window. Used on machines with no display (e.g. Ubuntu Server on a Rpi).
+# Checked this early, before importing webview, since pywebview can pull in
+# GTK/WebKit bindings that aren't installed on a headless box.
+HEADLESS = ("--headless" in sys.argv) or ("--remote" in sys.argv)
+
+if HEADLESS:
+    webview = None
+else:
+    import webview
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR    = os.path.join(_BASE_DIR, "logs")
 GROUPS_DIR = os.path.join(_BASE_DIR, "groups")
 SCENARI_DIR = os.path.join(_BASE_DIR, "scenari")
+UPLOAD_DIR = os.path.join(_BASE_DIR, "uploads")
 
 os.makedirs(GROUPS_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Dimensions
 WIN_W          = 800
@@ -57,7 +70,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from parsers import get_parser, format_block
 TERMINAL_PARSER  = config.get("server", "parser",          fallback="auto").strip().lower()
 TERMINAL_PRETTY  = config.get("server", "terminal_pretty", fallback="true").strip().lower() == "true"
-SCAN_INTERVAL    = int(config.get("server", "scan_interval", fallback="15"))   # background adapter scan period (s)
+SCAN_INTERVAL    = int(config.get("server", "scan_interval", fallback="15"))   # background adapter scan period (s); 0 = disable periodic auto-refresh (manual refresh only)
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -619,12 +632,19 @@ def _scan_once():
     try:
         _adapters_snapshot["scanning"] = True
         _emit_adapters()
-        # Phase 1 — USB only (fast): publish right away so the list is reactive.
+        # Phase 1 — USB only (fast): publish right away so USB changes are
+        # reactive. Keep whatever net/IP adapters are already known instead of
+        # dropping them until phase 2 completes — replacing the snapshot with
+        # a USB-only list here made every already-detected net adapter
+        # disappear from the UI for a few seconds on every scan cycle.
         t0 = time.time()
-        _adapters_snapshot["adapters"] = _build_adapters(usb=True, net=False)
+        usb_adapters = _build_adapters(usb=True, net=False)
+        known_net = [a for a in _adapters_snapshot["adapters"] if a["connectivityType"] != "usb"]
+        _adapters_snapshot["adapters"] = usb_adapters + known_net
         print(f"[TIMING] phase1 (usb build_adapters, incl. probe) took {time.time() - t0:.2f}s")
         _emit_adapters()
-        # Phase 2 — full USB + network (slow --net): publish the complete list.
+        # Phase 2 — full USB + network (slow --net): publish the complete,
+        # authoritative list (this is what actually drops stale/gone adapters).
         t0 = time.time()
         _adapters_snapshot["adapters"] = _build_adapters(usb=True, net=True)
         print(f"[TIMING] phase2 (usb+net build_adapters, incl. probe) took {time.time() - t0:.2f}s")
@@ -637,10 +657,17 @@ def _scan_once():
         _scan_lock.release()
 
 def _scanner_loop():
-    """Periodic background scanner (every SCAN_INTERVAL seconds)."""
+    """Periodic background scanner (every SCAN_INTERVAL seconds). If
+    scan_interval is 0 (or negative) in config.ini, auto-refresh is disabled
+    after the initial scan — adapters then only update via the manual
+    refresh button (⟳ / POST /scan), never on a timer."""
+    _scan_once()
+    if SCAN_INTERVAL <= 0:
+        print("[SCAN] scan_interval=0 — periodic auto-refresh disabled, manual refresh only")
+        return
     while True:
-        _scan_once()
         socketio.sleep(SCAN_INTERVAL)
+        _scan_once()
 
 
 @app.route("/scan", methods=["POST"])
@@ -658,6 +685,31 @@ def adapters():
         "adapters": _adapters_snapshot["adapters"],
         "scanning": _adapters_snapshot["scanning"],
     })
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    """Browser-based file upload. Used by the web UI in place of
+    pywebview.api.pick_file() whenever there is no native window to show a
+    file dialog from — i.e. every remote/headless session, but also any
+    ordinary browser tab pointed at the app. The file is written under
+    uploads/<kind>/ and the resulting server-side path is returned; callers
+    use it exactly like a path picked natively (flash, scenario, script...).
+    """
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "no file"}), 400
+
+    kind = re.sub(r"[^a-zA-Z0-9_-]", "", request.form.get("kind", "misc")) or "misc"
+    dest_dir = os.path.join(UPLOAD_DIR, kind)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    filename = secure_filename(f.filename)
+    if not filename:
+        return jsonify({"ok": False, "error": "invalid filename"}), 400
+    dest = os.path.join(dest_dir, filename)
+    f.save(dest)
+    return jsonify({"ok": True, "path": dest, "filename": filename})
+
 
 # ── terminal window API ────────────────────────────
 class WindowAPI:
@@ -3056,6 +3108,18 @@ def handle_join_run(data):
 if __name__ == "__main__":
     TRACES = "--traces" in sys.argv
 
+    if HEADLESS:
+        # Best-effort LAN IP for the banner (doesn't actually send traffic).
+        _ip = "127.0.0.1"
+        try:
+            with sock_module.socket(sock_module.AF_INET, sock_module.SOCK_DGRAM) as _s:
+                _s.connect(("8.8.8.8", 80))
+                _ip = _s.getsockname()[0]
+        except Exception:
+            pass
+        # Printed on the real stdout since it gets silenced just below unless --traces.
+        print(f"[HEADLESS] My Lab web UI ready -> http://{_ip}:{WEB_PORT}", file=sys.__stdout__)
+
     # Silence all print() output unless --traces
     if not TRACES:
         sys.stdout = open(os.devnull, "w")
@@ -3083,12 +3147,22 @@ if __name__ == "__main__":
     # Background adapter enumeration (USB first, then --net), every SCAN_INTERVAL s.
     socketio.start_background_task(_scanner_loop)
 
-    webview.create_window(
-        "My Lab",
-        f"http://127.0.0.1:{WEB_PORT}",
-        width=WIN_W,
-        height=WIN_COLLAPSED,
-        resizable=True,
-        js_api=WindowAPI()
-    )
-    webview.start()
+    if HEADLESS:
+        # No display: keep the process alive on the socketio server thread
+        # instead of opening a native pywebview window. Access the UI from
+        # any browser at http://<rpi-ip>:{WEB_PORT} (make sure config.ini
+        # has host = 0.0.0.0, otherwise the server only listens locally).
+        try:
+            t.join()
+        except KeyboardInterrupt:
+            pass
+    else:
+        webview.create_window(
+            "My Lab",
+            f"http://127.0.0.1:{WEB_PORT}",
+            width=WIN_W,
+            height=WIN_COLLAPSED,
+            resizable=True,
+            js_api=WindowAPI()
+        )
+        webview.start()

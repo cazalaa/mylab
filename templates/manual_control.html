@@ -161,50 +161,86 @@ async function renderFromSource(key, gdata) {
     renderTestCards(adapters);
 }
 
+// Cards persist across renders (keyed by serial) so a rescan only adds/removes
+// what actually changed instead of tearing down and rebuilding everything —
+// that full rebuild was what made adapters visibly disappear every 15s.
+let _testCardEls = {};
+
 function renderTestCards(adapters) {
     const container = document.getElementById("testCardList");
     const empty     = document.getElementById("testEmpty");
-    container.innerHTML = "";
 
     if (!adapters || adapters.length === 0) {
         empty.style.display = "";
+        container.innerHTML = "";
+        _testCardEls = {};
         return;
     }
     empty.style.display = "none";
 
+    const seen = new Set();
+
     adapters.forEach(a => {
+        const serial = a.serialNumber;
+        seen.add(serial);
+
         const isIP       = a.connectivityType !== "usb";
         const typeLabel  = isIP && a.host ? a.host : "USB";
         const typeClass  = isIP ? "pill-ip" : "pill-usb";
         const nick       = a.nickname || "";
         const partNo     = (a.boardId && a.boardId !== "Unknown") ? a.boardId : "";
 
-        const card = document.createElement("div");
-        card.className = "test-card";
-        card.innerHTML = `
-            <div class="test-card-header">
-                <div class="test-card-top">
-                    <span class="board-serial">${a.serialNumber}</span>
-                    <span class="pill ${typeClass}">${typeLabel}</span>
+        let card = _testCardEls[serial];
+        if (!card) {
+            // First time we see this serial — build its card once.
+            card = document.createElement("div");
+            card.className = "test-card";
+            card.dataset.serial = serial;
+            card.innerHTML = `
+                <div class="test-card-header">
+                    <div class="test-card-top">
+                        <span class="board-serial">${serial}</span>
+                        <span class="pill" data-role="type"></span>
+                    </div>
+                    <div class="test-card-sub" data-role="sub"></div>
                 </div>
-                <div class="test-card-sub">
-                    ${nick ? `<span class="board-nickname">${nick}</span>` : `<span></span>`}
-                    ${partNo ? `<span class="board-id-chip" title="Board number — use as 'board:' in scenarios">${partNo}</span>` : ""}
-                </div>
-            </div>
-            <div class="test-card-buttons">
-                <div class="test-btn-row">
-                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onErase(this)">Erase</button>
-                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onFlashClick(this)">Flash</button>
-                </div>
-                <div class="test-fw-label" id="fw_${a.serialNumber}"></div>
-                <div class="test-btn-row">
-                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onCli(this)">Cli</button>
-                    <button class="test-btn-half" data-serial="${a.serialNumber}" onclick="onReset(this)">Reset</button>
-                </div>
-            </div>`;
+                <div class="test-card-buttons">
+                    <div class="test-btn-row">
+                        <button class="test-btn-half" data-serial="${serial}" onclick="onErase(this)">Erase</button>
+                        <button class="test-btn-half" data-serial="${serial}" onclick="onFlashClick(this)">Flash</button>
+                    </div>
+                    <div class="test-fw-label" id="fw_${serial}"></div>
+                    <div class="test-btn-row">
+                        <button class="test-btn-half" data-serial="${serial}" onclick="onCli(this)">Cli</button>
+                        <button class="test-btn-half" data-serial="${serial}" onclick="onReset(this)">Reset</button>
+                    </div>
+                </div>`;
+            _testCardEls[serial] = card;
+        }
+
+        // Patch only what can change between scans — never touch the button
+        // row, so an in-progress flash/erase state survives a rescan.
+        const pill = card.querySelector('[data-role="type"]');
+        pill.className   = `pill ${typeClass}`;
+        pill.textContent = typeLabel;
+
+        card.querySelector('[data-role="sub"]').innerHTML = `
+            ${nick ? `<span class="board-nickname">${nick}</span>` : `<span></span>`}
+            ${partNo ? `<span class="board-id-chip" title="Board number — use as 'board:' in scenarios">${partNo}</span>` : ""}`;
+
+        // Keep DOM order aligned with the adapters array. appendChild on a
+        // node already in the container just moves it — no re-creation.
         container.appendChild(card);
     });
+
+    // Drop only the cards for adapters that actually disappeared.
+    for (const serial of Object.keys(_testCardEls)) {
+        if (!seen.has(serial)) {
+            const el = _testCardEls[serial];
+            if (el.parentNode === container) container.removeChild(el);
+            delete _testCardEls[serial];
+        }
+    }
 }
 
 async function onCli(btn) {
@@ -276,9 +312,11 @@ async function onFlash(btn) {
         if (!result) return;
         path = result;
     } else {
-        // Browser fallback — not supported without pywebview
-        alert("File picker requires the desktop app.");
-        return;
+        // No native window (remote/headless session) — pick the file in the
+        // browser and upload it to the server, which returns a server-side
+        // path usable exactly like a pywebview-picked one.
+        path = await mylabPickFile("firmware", ".hex,.s37");
+        if (!path) return;
     }
     _lastFirmware[serial] = path;
     // Show truncated filename under the button

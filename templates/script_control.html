@@ -259,12 +259,20 @@ function sc2Esc(s) {
 // ── Open ──────────────────────────────────────────────────────
 async function sc2Open() {
     let path = null;
-    try {
-        path = await window.pywebview.api.pick_file(
-            window.appState?.scenariDir || "",
-            ["YAML files (*.yaml)", "All files (*.*)"]
-        );
-    } catch(e) {
+    if (window.pywebview) {
+        try {
+            path = await window.pywebview.api.pick_file(
+                window.appState?.scenariDir || "",
+                ["YAML files (*.yaml)", "All files (*.*)"]
+            );
+        } catch(e) {
+            path = prompt("YAML file path:");
+        }
+    } else if (typeof mylabPickFile === "function") {
+        // No native window (remote/headless session) — upload the scenario
+        // from the browser instead of typing a server-side path.
+        path = await mylabPickFile("scenario", ".yaml,.yml");
+    } else {
         path = prompt("YAML file path:");
     }
     if (!path) return;
@@ -797,6 +805,12 @@ async function sc2BrowseFile(inputId) {
 async function sc2PickFile(fileTypes) {
     if (window.pywebview?.api)
         return await window.pywebview.api.pick_file(sc2DirPath || "", fileTypes);
+    if (typeof mylabPickFile === "function") {
+        // No native window (remote/headless session) — upload the file from
+        // the browser; sc2CopyFile() then copies it next to the scenario.
+        const accept = (fileTypes || []).some(t => /\.s37/i.test(t)) ? ".s37" : ".py";
+        return await mylabPickFile("scenario-asset", accept);
+    }
     return prompt("File path:") || null;
 }
 async function sc2CopyFile(srcPath) {
