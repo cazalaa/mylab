@@ -239,12 +239,14 @@ function openRunPanel(run_id) {
     sc.on("run_terminal_ready", ({ serial, url }) => {
         // Headless mode: no native window can open for open_terminal/
         // show_terminal, so the backend sends the terminal URL here instead —
-        // surface it as a clickable link on that board's card. Uses its own
-        // slot (not msg_${serial}), which run_board_status keeps overwriting
-        // as the script progresses.
+        // surface it as a real button on that board's card, in its own slot
+        // (not msg_${serial}), which run_board_status keeps overwriting as
+        // the script progresses.
         const termEl = document.getElementById(`term_${serial}`);
         if (termEl) {
-            termEl.innerHTML = `<a href="${esc(url)}" target="_blank" style="color:#185FA5;text-decoration:underline;">Open Terminal ↗</a>`;
+            termEl.innerHTML =
+                `<a class="sc-browse-btn" href="${esc(url)}" target="_blank" ` +
+                `style="display:inline-block; text-decoration:none; margin-top:4px;">▶ Terminal</a>`;
         }
     });
 
