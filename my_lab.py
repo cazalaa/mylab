@@ -2485,6 +2485,11 @@ class Board:
         if self.open_terminal_flag:
             def _open():
                 url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}?from_run=1&run_id={self.run_id}"
+                if HEADLESS:
+                    # No native window in headless mode — surface the URL
+                    # instead of crashing on webview.create_window(None...).
+                    print(f"[RUN] open_terminal requested for {self.serial} (headless) -> {url}")
+                    return
                 win = webview.create_window(
                     f"{self.serial} — Terminal", url,
                     width=820, height=620, resizable=True)
@@ -2508,6 +2513,9 @@ class Board:
         def _open():
             url = (f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}"
                    f"?from_run=1&run_id={self.run_id}&view={v}")
+            if HEADLESS:
+                print(f"[RUN] show_terminal requested for {self.serial} (headless) -> {url}")
+                return
             win = webview.create_window(
                 f"{self.serial} — Terminal", url,
                 width=820, height=620, resizable=True)
@@ -3214,6 +3222,7 @@ def scenario_run():
                                   room=run_room)
                     return board_obj, bc
                 except Exception as e:
+                    print(f"[RUN] Phase 2 connect FAILED serial={serial}: {e}")
                     failed.add(serial)
                     active_runs[run_id]["boards"][serial] = "error"
                     socketio.emit("run_board_status",
