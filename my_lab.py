@@ -124,7 +124,9 @@ def _adapters_compat():
     """pycommander adapters in the legacy {serialNumber, host, nickname, boards}
     shape consumed by the scenario validator/resolver. `boards` now carries the
     real target board (from Adapter.info()) so the check can match the scenario's
-    `board:` against what's physically connected. Empty if it can't be read."""
+    `board:` against what's physically connected. Empty if it can't be read.
+    This does a *live* enumeration — use _adapters_compat_cached() for anything
+    that doesn't need to hit the hardware right this instant (e.g. Check)."""
     out = []
     for a in pyc_list_adapters():
         bid = _board_id_from_info(a["serial"], a.get("ip"))   # e.g. 'BRD2606A' (rev-stripped)
@@ -132,6 +134,26 @@ def _adapters_compat():
         out.append({
             "serialNumber": a["serial"],
             "host":         a.get("ip"),
+            "nickname":     a.get("nickname", ""),
+            "boards":       boards,
+        })
+    return out
+
+
+def _adapters_compat_cached():
+    """Same shape as _adapters_compat(), but built from the background
+    scanner's already-scanned _adapters_snapshot instead of a fresh live
+    enumeration. Used by Check (a dry-run validation): re-probing every
+    adapter on every Check click was what made it slow (tens of seconds on
+    a Rpi with several IP boards) — the periodic/manual scan already keeps
+    this snapshot reasonably fresh, so Check can just read it."""
+    out = []
+    for a in _adapters_snapshot.get("adapters", []):
+        bid = a.get("boardId")
+        boards = [{"id": bid, "shortLabel": bid, "label": bid, "pn": bid}] if bid and bid != "Unknown" else []
+        out.append({
+            "serialNumber": a.get("serialNumber"),
+            "host":         a.get("host"),
             "nickname":     a.get("nickname", ""),
             "boards":       boards,
         })
@@ -1351,7 +1373,7 @@ def scenarios_default():
 
 @app.route("/api/scenario-mkdir", methods=["POST"])
 def scenario_mkdir():
-    base = request.json.get("base", SCENARI_DIR)
+    base = request.json.get("base") or SCENARI_DIR
     dir_name = request.json.get("dir", "").strip()
     if not dir_name:
         return jsonify({"error": "empty name"}), 400
@@ -1445,7 +1467,7 @@ def scenario_open_save():
 @app.route("/api/scenario-update", methods=["POST"])
 def scenario_update():
     """Overwrite an existing scenario file with new content."""
-    base    = request.json.get("base", SCENARI_DIR)
+    base    = request.json.get("base") or SCENARI_DIR
     path    = request.json.get("path", "").strip()
     content = request.json.get("content", "")
     base    = os.path.abspath(base)
@@ -1459,7 +1481,7 @@ def scenario_update():
 
 @app.route("/api/scenario-save", methods=["POST"])
 def scenario_save():
-    base    = request.json.get("base", SCENARI_DIR)
+    base    = request.json.get("base") or SCENARI_DIR
     dir_name = request.json.get("dir", "").strip()
     name    = request.json.get("name", "").strip()
     content = request.json.get("content", "")
@@ -1503,7 +1525,7 @@ def _read_check_status(scenario_dir):
 
 @app.route("/api/scenario-check", methods=["POST"])
 def scenario_check():
-    base     = request.json.get("base", SCENARI_DIR)
+    base     = request.json.get("base") or SCENARI_DIR
     path     = request.json.get("path", "")
     content  = request.json.get("content", None)
     dir_name = request.json.get("dir", "")
@@ -1620,9 +1642,10 @@ def check_scenario(content, scenario_dir):
     /api/scenario-run refuses to launch when any error-level issue is present."""
     scenario_dir = os.path.abspath(scenario_dir)
 
-    # Load available adapters (pycommander)
+    # Load available adapters — from the already-scanned cache, not a fresh
+    # live probe (Check is a dry-run validation, not a hardware operation).
     try:
-        adapters_data = _adapters_compat()
+        adapters_data = _adapters_compat_cached()
     except Exception as e:
         return [{"line": None, "msg": f"Cannot enumerate adapters: {e}", "level": "error"}]
 
@@ -1791,7 +1814,7 @@ def check_scenario(content, scenario_dir):
 @app.route("/api/scenario-copy-file", methods=["POST"])
 def scenario_copy_file():
     src      = request.json.get("src", "")
-    base     = request.json.get("base", SCENARI_DIR)
+    base     = request.json.get("base") or SCENARI_DIR
     dir_name = request.json.get("dir", "")
     base     = os.path.abspath(base)
     dest_dir = os.path.abspath(os.path.join(base, dir_name))
@@ -1873,7 +1896,7 @@ def scenario_upload_zip():
     if not f.filename.lower().endswith(".zip"):
         return jsonify({"ok": False, "error": "expected a .zip archive"}), 400
 
-    base = os.path.abspath(request.form.get("base", SCENARI_DIR))
+    base = os.path.abspath(request.form.get("base") or SCENARI_DIR)
     tmp_zip = os.path.join(UPLOAD_DIR, secure_filename(f.filename))
     f.save(tmp_zip)
     try:
@@ -2921,7 +2944,7 @@ def _run_board(board_cfg, scenario_dir, run_id, script_code):
 
 @app.route("/api/scenario-run", methods=["POST"])
 def scenario_run():
-    base = request.json.get("base", SCENARI_DIR)
+    base = request.json.get("base") or SCENARI_DIR
     path = request.json.get("path", "")
     base = os.path.abspath(base)
     full = os.path.abspath(os.path.join(base, path))

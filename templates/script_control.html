@@ -114,6 +114,8 @@
 <script>
 const SC2_HEADLESS = {{ 'true' if headless else 'false' }};
 let sc2DefaultBase = null;   // SCENARI_DIR, fetched once and cached
+let sc2PendingAssets = [];   // [{src, filename}] — files picked before the scenario
+                              // has a saved directory; copied in on Save/Save As.
 
 function getSocket() {
     return window._appSocket || (window._appSocket = io());
@@ -323,6 +325,7 @@ async function sc2LoadPathIntoEditor(path) {
 
     sc2FilePath = path;
     sc2DirPath  = data.dir;
+    sc2PendingAssets = [];
 
     // Wait for jsyaml CDN if not yet loaded
     let attempts = 0;
@@ -351,6 +354,8 @@ async function sc2LoadPathIntoEditor(path) {
 // ── New ───────────────────────────────────────────────────────
 function sc2New() {
     sc2FilePath = null;
+    sc2DirPath  = null;    // was previously left pointing at whichever scenario was open before
+    sc2PendingAssets = [];
     sc2Scenario = { boards: [] };   // valid empty scenario
     sc2Expanded = null;
     sc2UpdatePathBar(null);
@@ -361,6 +366,7 @@ function sc2New() {
     document.getElementById("sc2CheckBtn").disabled = false;
     document.getElementById("sc2SaveBtn").disabled  = true;
     document.getElementById("sc2RunBtn").disabled   = true;
+    document.getElementById("sc2ExportZipBtn").disabled = true;
     document.getElementById("sc2CheckWrap").style.display = "none";
 }
 
@@ -405,8 +411,9 @@ async function sc2Save() {
         body: JSON.stringify({ path: sc2FilePath, content })
     });
     const data = await res.json();
-    if (!data.ok) alert("Save failed: " + data.error);
-    else sc2Flash("sc2SaveBtn", "Saved ✓");
+    if (!data.ok) { alert("Save failed: " + data.error); return; }
+    await sc2FlushPendingAssets();
+    sc2Flash("sc2SaveBtn", "Saved ✓");
 }
 
 // ── Save As ───────────────────────────────────────────────────
@@ -423,10 +430,12 @@ async function sc2SaveAs() {
 
     let dir = sc2DirPath;
     if (!dir) {
-        dir = prompt("Directory (full path):", "");
-        if (!dir || !dir.trim()) return;
-        sc2DirPath = dir.trim();
-        dir = sc2DirPath;
+        const base = await sc2GetDefaultBase();
+        const name = prompt("Scenario name (folder created under scenari/):", filename.replace(/\.ya?ml$/i, ""));
+        if (!name || !name.trim()) return;
+        const safeName = name.trim().replace(/[^a-zA-Z0-9_\-. ]/g, "");
+        dir = `${base.replace(/\/$/, "")}/${safeName}`;
+        sc2DirPath = dir;
     }
     const path = dir.replace(/\/$/, "") + "/" + filename;
 
@@ -465,6 +474,7 @@ async function sc2SaveAs() {
     sc2UpdateTitle(filename.replace(/\.ya?ml$/i, "").toUpperCase());
     document.getElementById("sc2SaveBtn").disabled = false;
     document.getElementById("sc2ExportZipBtn").disabled = !sc2DirPath;
+    await sc2FlushPendingAssets();
     sc2Flash("sc2SaveAsBtn", "Saved ✓");
 }
 
@@ -1118,8 +1128,19 @@ async function sc2PickFile(fileTypes) {
     return prompt("File path:") || null;
 }
 async function sc2CopyFile(srcPath) {
-    const dir  = sc2DirPath ? sc2DirPath.split("/").pop() : "";
-    const base = sc2DirPath ? sc2DirPath.substring(0, sc2DirPath.lastIndexOf("/")) : "";
+    const filename = srcPath.split("/").pop().split("\\").pop();
+
+    if (!sc2DirPath) {
+        // New, not-yet-saved scenario — there's no directory to copy into
+        // yet. Remember it and copy for real once Save/Save As creates one
+        // (see sc2FlushPendingAssets). The board/script field already gets
+        // the right filename immediately, so the UI doesn't wait on this.
+        sc2PendingAssets.push({ src: srcPath, filename });
+        return filename;
+    }
+
+    const dir  = sc2DirPath.split("/").pop();
+    const base = sc2DirPath.substring(0, sc2DirPath.lastIndexOf("/"));
     try {
         const res  = await fetch("/api/scenario-copy-file", {
             method: "POST",
@@ -1130,6 +1151,31 @@ async function sc2CopyFile(srcPath) {
         if (!data.ok) { alert("Copy failed: " + data.error); return null; }
         return data.filename;
     } catch(e) { return null; }
+}
+
+// Copy every file picked before the scenario had a directory (see
+// sc2CopyFile above) now that sc2DirPath is known. Called right after a
+// successful Save/Save As, once the target folder actually exists on disk.
+async function sc2FlushPendingAssets() {
+    if (!sc2PendingAssets.length || !sc2DirPath) return;
+    const dir  = sc2DirPath.split("/").pop();
+    const base = sc2DirPath.substring(0, sc2DirPath.lastIndexOf("/"));
+    const failed = [];
+    for (const item of sc2PendingAssets) {
+        try {
+            const res  = await fetch("/api/scenario-copy-file", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ src: item.src, base, dir })
+            });
+            const data = await res.json();
+            if (!data.ok) failed.push(`${item.filename}: ${data.error}`);
+        } catch(e) {
+            failed.push(`${item.filename}: ${e}`);
+        }
+    }
+    sc2PendingAssets = [];
+    if (failed.length) alert("Some files could not be copied into the scenario folder:\n" + failed.join("\n"));
 }
 
 // ── Update handlers ───────────────────────────────────────────
