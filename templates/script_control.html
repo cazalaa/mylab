@@ -35,12 +35,17 @@
     </div>
 </div>
 
+<div id="sc2EditorView" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
 <!-- ── Toolbar ── -->
 <div class="sc2-toolbar">
+    <button id="sc2BackToListBtn" onclick="sc2ShowListView()" style="display:none">← Scenarios</button>
     <button id="sc2OpenBtn"   onclick="sc2Open()">Open</button>
     <button id="sc2NewBtn"    onclick="sc2New()">New</button>
     <button id="sc2SaveBtn"   onclick="sc2Save()"  disabled>Save</button>
     <button id="sc2SaveAsBtn" onclick="sc2SaveAs()">Save As</button>
+    <div class="sc2-sep"></div>
+    <button id="sc2ImportZipBtn" onclick="sc2ImportZip()" title="Import a whole scenario folder (yaml + scripts + firmware) from a .zip">Import .zip</button>
+    <button id="sc2ExportZipBtn" onclick="sc2ExportZip()" disabled title="Download the whole scenario folder (yaml, scripts, firmware, and anything generated at runtime like CSVs) as a .zip">Export .zip</button>
     <div class="sc2-sep"></div>
     <button id="sc2CheckBtn"  onclick="sc2Check()" disabled>Check</button>
     <button id="sc2RunBtn"    onclick="sc2Run()"   disabled>Run</button>
@@ -85,8 +90,31 @@
     <button onclick="sc2CloseGroupPicker()" style="margin-top:12px; width:100%;">Cancel</button>
   </div>
 </div>
+</div> <!-- /sc2EditorView -->
+
+<!-- ── Headless scenario list view ──────────────────────────────
+     Shown instead of the editor by default when running --headless/--remote.
+     Transfer happens by zip (Import/Export); execution only ever happens
+     from this list, never from inside the editor — the editor here is for
+     creating/checking a scenario, not running it. -->
+<div id="sc2ListView" style="display:none; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
+    <div class="sc2-toolbar">
+        <button id="sc2ListImportBtn" onclick="sc2ListImportZip()" title="Import one or several scenario folders from .zip file(s)">Import .zip</button>
+        <button onclick="sc2LoadScenarioList()">↻ Refresh</button>
+        <div class="sc2-sep"></div>
+        <button onclick="sc2New(); sc2ShowEditorView();">+ New scenario</button>
+    </div>
+    <div id="sc2ListEmpty" style="display:none; padding:32px; text-align:center; color:#8899aa; font-size:13px;">
+        No scenario on this Rpi yet — use <b>Import .zip</b> or <b>+ New scenario</b>.
+    </div>
+    <div id="sc2ScenarioList" style="display:flex; flex-direction:column; gap:8px; flex:1; min-height:0; overflow-y:auto; padding:4px 2px;"></div>
+</div>
+
 
 <script>
+const SC2_HEADLESS = {{ 'true' if headless else 'false' }};
+let sc2DefaultBase = null;   // SCENARI_DIR, fetched once and cached
+
 function getSocket() {
     return window._appSocket || (window._appSocket = io());
 }
@@ -276,16 +304,22 @@ async function sc2Open() {
         path = prompt("YAML file path:");
     }
     if (!path) return;
+    await sc2LoadPathIntoEditor(path);
+}
 
+// Shared "load this yaml path into the editor" logic — used by Open, by
+// Import .zip (open the scenario right after importing it), and by the
+// headless scenario list's Edit action.
+async function sc2LoadPathIntoEditor(path) {
     let data;
     try {
         const res = await fetch(`/api/scenario-open?path=${encodeURIComponent(path)}`);
         data = await res.json();
     } catch(e) {
-        alert("Fetch error: " + e); return;
+        alert("Fetch error: " + e); return false;
     }
-    if (!data.ok) { alert("Could not open: " + data.error); return; }
-    if (!data.content) { alert("File is empty or unreadable"); return; }
+    if (!data.ok) { alert("Could not open: " + data.error); return false; }
+    if (!data.content) { alert("File is empty or unreadable"); return false; }
 
     sc2FilePath = path;
     sc2DirPath  = data.dir;
@@ -295,12 +329,12 @@ async function sc2Open() {
     while (!window.jsyaml && attempts++ < 10) {
         await new Promise(r => setTimeout(r, 200));
     }
-    if (!window.jsyaml) { alert("YAML parser not available"); return; }
+    if (!window.jsyaml) { alert("YAML parser not available"); return false; }
 
     try {
         sc2Scenario = window.jsyaml.load(data.content) || {};
     } catch(e) {
-        alert("YAML parse error: " + e.message); return;
+        alert("YAML parse error: " + e.message); return false;
     }
 
     sc2UpdatePathBar(data.filename);
@@ -310,6 +344,8 @@ async function sc2Open() {
     document.getElementById("sc2SaveBtn").disabled  = false;
     document.getElementById("sc2RunBtn").disabled   = true;
     document.getElementById("sc2CheckWrap").style.display = "none";
+    document.getElementById("sc2ExportZipBtn").disabled = !sc2DirPath;
+    return true;
 }
 
 // ── New ───────────────────────────────────────────────────────
@@ -340,6 +376,7 @@ async function sc2ChangeDir() {
     sc2DirPath = dir;
     document.getElementById("sc2Dir").innerText = dir;
     document.getElementById("sc2Empty").style.display = "none";
+    document.getElementById("sc2ExportZipBtn").disabled = !sc2DirPath;
 }
 
 // ── Save ──────────────────────────────────────────────────────
@@ -427,7 +464,274 @@ async function sc2SaveAs() {
     sc2UpdatePathBar(filename);
     sc2UpdateTitle(filename.replace(/\.ya?ml$/i, "").toUpperCase());
     document.getElementById("sc2SaveBtn").disabled = false;
+    document.getElementById("sc2ExportZipBtn").disabled = !sc2DirPath;
     sc2Flash("sc2SaveAsBtn", "Saved ✓");
+}
+
+// ── Import a whole scenario folder from a .zip (yaml + scripts + firmware) ──
+// Local/native mode only — see sc2ListImportZip() for the headless
+// scenario-list equivalent (multi-file, no auto-run).
+async function sc2ImportZip() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".zip";
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    input.onchange = async () => {
+        const file = input.files && input.files[0];
+        document.body.removeChild(input);
+        if (!file) return;
+
+        const defaultName = file.name.replace(/\.zip$/i, "");
+        const dirName = prompt("Scenario folder name (under scenari/):", defaultName);
+        if (dirName === null) return;
+
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("dir", dirName.trim());
+        let data;
+        try {
+            const res = await fetch("/api/scenario-upload-zip", { method: "POST", body: fd });
+            data = await res.json();
+        } catch(e) {
+            alert("Upload error: " + e); return;
+        }
+        if (!data.ok) { alert("Import failed: " + data.error); return; }
+        if (!data.yaml) {
+            alert("Imported, but no .yaml file found at the top of the archive — open the folder manually.");
+            return;
+        }
+
+        const path = data.dir.replace(/\/$/, "") + "/" + data.yaml;
+        const opened = await sc2LoadPathIntoEditor(path);
+        if (!opened) return;
+        sc2Flash("sc2ImportZipBtn", "Imported ✓");
+
+        // Auto Check → Run right after import, so a scenario transferred
+        // from another machine launches immediately instead of needing a
+        // separate manual Check + Run. Local/native mode only: in headless
+        // mode, execution must go through the scenario list, not the editor.
+        if (SC2_HEADLESS) return;
+        await sc2Check();
+        if (!document.getElementById("sc2RunBtn").disabled) {
+            sc2Run();
+        }
+    };
+    input.click();
+}
+
+// ── Export the whole scenario folder as a .zip (yaml, scripts, firmware, ──
+// and anything a run produced there — e.g. measurement CSVs). A plain
+// navigation download so the browser saves it wherever downloads normally
+// land, no extra plumbing needed.
+function sc2ExportZip() {
+    if (!sc2DirPath) { alert("No scenario folder open"); return; }
+    window.open(`/api/dir-download-zip?dir=${encodeURIComponent(sc2DirPath)}`, "_blank");
+}
+
+// ════════════════════════════════════════════════════════════════
+// Headless scenario list — the app's home view when running
+// --headless/--remote. Transfer is by zip (Import/Export); Check and
+// New/Save are still done through the editor, but Run only ever happens
+// from a row in this list, never from inside the editor.
+// ════════════════════════════════════════════════════════════════
+
+async function sc2GetDefaultBase() {
+    if (sc2DefaultBase) return sc2DefaultBase;
+    try {
+        const res  = await fetch("/api/scenarios-default");
+        const data = await res.json();
+        sc2DefaultBase = data.path;
+    } catch(e) {
+        sc2DefaultBase = "";
+    }
+    return sc2DefaultBase;
+}
+
+function sc2ShowListView() {
+    document.getElementById("sc2ListView").style.display   = "";
+    document.getElementById("sc2EditorView").style.display = "none";
+    sc2LoadScenarioList();
+}
+
+function sc2ShowEditorView() {
+    document.getElementById("sc2ListView").style.display   = "none";
+    document.getElementById("sc2EditorView").style.display = "";
+}
+
+const SC2_STATUS_COLOR = { ok: "#3FAE5A", warning: "#EF9F27", error: "#E24B4A", unchecked: "#B7C0CC" };
+
+async function sc2LoadScenarioList() {
+    const listEl  = document.getElementById("sc2ScenarioList");
+    const emptyEl = document.getElementById("sc2ListEmpty");
+    let scenarios;
+    try {
+        const res = await fetch("/api/scenarios");
+        scenarios = await res.json();
+    } catch(e) {
+        listEl.innerHTML = `<div style="color:#E24B4A;padding:12px;">Failed to load: ${esc(String(e))}</div>`;
+        return;
+    }
+    if (!scenarios.length) {
+        listEl.innerHTML = "";
+        emptyEl.style.display = "";
+        return;
+    }
+    emptyEl.style.display = "none";
+    listEl.innerHTML = "";
+    scenarios.forEach(s => listEl.appendChild(sc2BuildScenarioCard(s)));
+}
+
+function sc2BuildScenarioCard(s) {
+    const color  = SC2_STATUS_COLOR[s.status] || SC2_STATUS_COLOR.unchecked;
+    const yaml   = (s.files && s.files[0]) || null;
+    const when   = s.ts ? new Date(s.ts * 1000).toLocaleString() : null;
+    const detail = s.status === "error"   ? `${s.errors} error${s.errors === 1 ? "" : "s"}`
+                 : s.status === "warning" ? `${s.warnings} warning${s.warnings === 1 ? "" : "s"}`
+                 : s.status === "ok"      ? "Checked OK"
+                 :                          "Not checked yet";
+    const runOk  = yaml && s.status === "ok";
+    const runWarn = yaml && s.status === "warning";
+
+    const card = document.createElement("div");
+    card.style.cssText = "display:flex; flex-direction:column; gap:8px; padding:14px 18px; " +
+        "background:#EFF2F9; border-radius:16px; flex:0 0 auto; " +
+        "box-shadow:-6px -6px 12px rgba(250,251,255,1), 6px 6px 12px rgba(22,27,29,0.18);";
+    card.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:10px; height:10px; border-radius:50%; background:${color}; flex-shrink:0;"></span>
+            <span style="font-weight:600; font-size:13px; color:#1a2630; flex:1;">${esc(s.dir)}</span>
+            <span style="font-size:11px; color:${color};">${detail}${when ? ` · ${esc(when)}` : ""}</span>
+        </div>
+        <div style="font-size:11px; color:#8899aa;">${yaml ? esc(yaml) : "no .yaml in this folder"}${s.files && s.files.length > 1 ? ` (+${s.files.length - 1} more)` : ""}</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button data-act="check" ${yaml ? "" : "disabled"}>Check</button>
+            <button data-act="run" ${(runOk || runWarn) ? "" : "disabled"} title="${runWarn ? "Has warnings — review before running" : ""}">Run</button>
+            <button data-act="edit" ${yaml ? "" : "disabled"}>Edit</button>
+            <button data-act="export">Export .zip</button>
+        </div>`;
+
+    card.querySelector('[data-act="check"]').onclick  = () => sc2ListCheck(s.dir, yaml);
+    card.querySelector('[data-act="run"]').onclick     = () => sc2ListRun(s.dir, yaml);
+    card.querySelector('[data-act="edit"]').onclick    = () => sc2ListEdit(s.dir, yaml);
+    card.querySelector('[data-act="export"]').onclick  = () => sc2ListExport(s.dir);
+    return card;
+}
+
+async function sc2ListCheck(dirName, yamlName) {
+    if (!yamlName) { alert("No .yaml file in this folder."); return; }
+    const base = await sc2GetDefaultBase();
+    try {
+        await fetch("/api/scenario-check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ base, path: `${dirName}/${yamlName}` })
+        });
+    } catch(e) {
+        alert("Check failed: " + e); return;
+    }
+    // Status is persisted server-side — reload the list to reflect it.
+    sc2LoadScenarioList();
+}
+
+async function sc2ListRun(dirName, yamlName) {
+    if (!yamlName) { alert("No .yaml file in this folder."); return; }
+    const base = await sc2GetDefaultBase();
+    let data;
+    try {
+        const res = await fetch("/api/scenario-run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ base, path: `${dirName}/${yamlName}` })
+        });
+        data = await res.json();
+    } catch(e) {
+        alert("Run failed: " + e); return;
+    }
+    if (!data.ok) {
+        const msg = (data.issues && data.issues.length)
+            ? data.issues.map(i => i.msg).join("\n")
+            : (data.error || "");
+        alert("Run refused:\n" + msg);
+        return;
+    }
+    const sc = getSocket();
+    if (sc.connected) {
+        sc.emit("join_run", { run_id: data.run_id });
+    } else {
+        sc.once("connect", () => sc.emit("join_run", { run_id: data.run_id }));
+    }
+    sc2ShowRunPanel(data.run_id, dirName.toUpperCase());
+}
+
+async function sc2ListEdit(dirName, yamlName) {
+    if (!yamlName) { alert("No .yaml file in this folder."); return; }
+    const base = await sc2GetDefaultBase();
+    const path = `${base.replace(/\/$/, "")}/${dirName}/${yamlName}`;
+    sc2ShowEditorView();
+    await sc2LoadPathIntoEditor(path);
+}
+
+async function sc2ListExport(dirName) {
+    const base = await sc2GetDefaultBase();
+    const dir  = `${base.replace(/\/$/, "")}/${dirName}`;
+    window.open(`/api/dir-download-zip?dir=${encodeURIComponent(dir)}`, "_blank");
+}
+
+// Import one or several scenario .zip files (each one either a single
+// scenario, or a folder of several scenarios) straight from the list.
+async function sc2ListImportZip() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".zip";
+    input.multiple = true;
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    input.onchange = async () => {
+        const files = Array.from(input.files || []);
+        document.body.removeChild(input);
+        if (!files.length) return;
+
+        const base = await sc2GetDefaultBase();
+        let imported = [];
+        let errors   = [];
+        for (const file of files) {
+            const fd = new FormData();
+            fd.append("file", file);
+            try {
+                const res  = await fetch("/api/scenario-upload-zip", { method: "POST", body: fd });
+                const data = await res.json();
+                if (!data.ok) { errors.push(`${file.name}: ${data.error}`); continue; }
+                imported = imported.concat(data.imported || []);
+            } catch(e) {
+                errors.push(`${file.name}: ${e}`);
+            }
+        }
+
+        // Auto-check every imported scenario so the list shows a real
+        // status right away instead of "not checked" for each one.
+        for (const item of imported) {
+            if (!item.yaml) continue;
+            const dirName = item.dir.replace(/\/$/, "").split("/").pop();
+            try {
+                await fetch("/api/scenario-check", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ base, path: `${dirName}/${item.yaml}` })
+                });
+            } catch(e) { /* best-effort */ }
+        }
+
+        sc2LoadScenarioList();
+        if (errors.length) {
+            alert(`Imported ${imported.length} scenario(s), ${errors.length} failed:\n` + errors.join("\n"));
+        } else {
+            sc2Flash("sc2ListImportBtn", `Imported ${imported.length} ✓`);
+        }
+    };
+    input.click();
 }
 
 // ── Check ─────────────────────────────────────────────────────
@@ -893,6 +1197,19 @@ function onPageLoad() {
     if (window.appState) {
         sc2DirPath = window.appState.scenariDir || null;
         sc2UpdatePathBar(null);
+    }
+
+    if (SC2_HEADLESS) {
+        // In headless mode the editor is for creation + Check only — Open
+        // (single-file) and Run move to the scenario list, and Import .zip
+        // is only meaningful from there too (multi-file, multi-scenario).
+        const hide = ["sc2OpenBtn", "sc2ImportZipBtn", "sc2RunBtn"];
+        hide.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = "none"; });
+        const back = document.getElementById("sc2BackToListBtn");
+        if (back) back.style.display = "";
+        sc2ShowListView();
+    } else {
+        sc2ShowEditorView();
     }
 }
 </script>

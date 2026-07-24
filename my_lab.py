@@ -9,11 +9,13 @@ import threading
 import datetime
 import re
 import uuid
+import io
+import zipfile
 import yaml
 import serial
 import serial.tools.list_ports
 from pathlib import Path
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 from flask_socketio import SocketIO, emit, join_room
 from werkzeug.utils import secure_filename
 import socket as sock_module
@@ -541,7 +543,7 @@ def index():
 def page(name):
     if name not in ALLOWED_PAGES:
         return "Not found", 404
-    return render_template(f"{name}.html")
+    return render_template(f"{name}.html", headless=HEADLESS)
 
 @app.route("/groups", methods=["GET"])
 def list_groups():
@@ -1327,7 +1329,7 @@ def list_scenarios():
                 if f.is_file() and f.name.endswith(".yaml")
             ])
             # Include directory even if empty
-            result.append({"dir": entry.name, "files": files})
+            result.append({"dir": entry.name, "files": files, **_read_check_status(entry.path)})
     return jsonify(result)
 
 @app.route("/api/scenario-content")
@@ -1377,6 +1379,47 @@ def scenario_open():
     })
 
 
+def _dir_mtime(d):
+    """Most recent mtime of any file under d (or the dir itself if empty).
+    Used to tell whether a sidecar <name>.zip snapshot is stale — e.g. a
+    scenario run wrote a new CSV into the folder after the last save/copy
+    that synced the zip."""
+    latest = os.path.getmtime(d)
+    for root, _, files in os.walk(d):
+        for fn in files:
+            try:
+                latest = max(latest, os.path.getmtime(os.path.join(root, fn)))
+            except OSError:
+                pass
+    return latest
+
+
+def _sync_scenario_zip(scenario_dir):
+    """Regenerate the <name>.zip snapshot that lives right next to a
+    scenario folder (scenari/<name>.zip), so the whole folder is always
+    available as a single up-to-date file — no manual export step. Called
+    after every save/add-file/import. Best-effort: a failure here must
+    never break the actual save/copy operation that triggered it.
+    """
+    try:
+        scenario_dir = os.path.abspath(scenario_dir)
+        if not os.path.isdir(scenario_dir):
+            return None
+        name = os.path.basename(scenario_dir.rstrip("/"))
+        zip_path = os.path.join(os.path.dirname(scenario_dir), f"{name}.zip")
+        tmp_path = zip_path + ".tmp"
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _, files in os.walk(scenario_dir):
+                for fn in files:
+                    full = os.path.join(root, fn)
+                    zf.write(full, os.path.relpath(full, scenario_dir))
+        os.replace(tmp_path, zip_path)  # atomic: never leaves a half-written zip
+        return zip_path
+    except Exception as e:
+        print(f"[SCENARIO-ZIP] sync failed for {scenario_dir}: {e}")
+        return None
+
+
 @app.route("/api/scenario-open-save", methods=["POST"])
 def scenario_open_save():
     """Write YAML content to an absolute path for the v2 editor."""
@@ -1395,6 +1438,7 @@ def scenario_open_save():
     with open(path, "w") as f:
         f.write(content)
     print(f"[SAVE] wrote {len(content)} chars to {path}")
+    _sync_scenario_zip(os.path.dirname(path))
     return jsonify({"ok": True, "dir": os.path.dirname(path)})
 
 
@@ -1430,6 +1474,33 @@ def scenario_save():
         f.write(content)
     return jsonify({"ok": True})
 
+CHECK_STATUS_FILENAME = ".mylab_check.json"
+
+
+def _write_check_status(scenario_dir, issues):
+    """Persist the last Check result next to a scenario's yaml, so the
+    headless scenario list can show a green/orange/red status without
+    re-running Check for every listing. Best-effort."""
+    try:
+        errors   = sum(1 for i in issues if i.get("level", "error") == "error")
+        warnings = sum(1 for i in issues if i.get("level") == "warning")
+        status   = "error" if errors else ("warning" if warnings else "ok")
+        payload  = {"status": status, "errors": errors, "warnings": warnings, "ts": time.time()}
+        with open(os.path.join(scenario_dir, CHECK_STATUS_FILENAME), "w") as f:
+            json.dump(payload, f)
+    except Exception as e:
+        print(f"[CHECK-STATUS] sync failed for {scenario_dir}: {e}")
+
+
+def _read_check_status(scenario_dir):
+    """Last persisted Check result for a scenario dir, or 'unchecked'."""
+    try:
+        with open(os.path.join(scenario_dir, CHECK_STATUS_FILENAME)) as f:
+            return json.load(f)
+    except Exception:
+        return {"status": "unchecked", "errors": 0, "warnings": 0, "ts": None}
+
+
 @app.route("/api/scenario-check", methods=["POST"])
 def scenario_check():
     base     = request.json.get("base", SCENARI_DIR)
@@ -1449,6 +1520,8 @@ def scenario_check():
             content = f.read()
 
     issues = check_scenario(content, scenario_dir)
+    if os.path.isdir(scenario_dir):
+        _write_check_status(scenario_dir, issues)
     return jsonify({"ok": not _scenario_has_errors(issues), "issues": issues, "content": content})
 
 
@@ -1738,11 +1811,135 @@ def scenario_copy_file():
         import shutil
         os.makedirs(dest_dir, exist_ok=True)
         shutil.copy2(src, dest)
+        _sync_scenario_zip(dest_dir)
         return jsonify({"ok": True, "filename": filename, "copied": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
     
 
+
+
+@app.route("/api/dir-download-zip")
+def dir_download_zip():
+    """Download a folder as a .zip. This is the simplest way to pull back
+    files a script produced on a remote/headless Rpi (measurement CSVs,
+    logs...), and also lets a scenario folder (yaml + scripts + firmware)
+    be grabbed in one shot instead of file by file.
+    For scenario folders, serves the already-synced <name>.zip snapshot
+    (kept fresh by _sync_scenario_zip on every save/copy/import) instead of
+    rebuilding it — falls back to building on the fly if that's missing or
+    stale, or for any other folder (e.g. logs/).
+    Restricted to scenari/ and logs/, the only dirs the app manages."""
+    d = os.path.abspath(request.args.get("dir", ""))
+    if not (d.startswith(SCENARI_DIR) or d.startswith(LOG_DIR)) or not os.path.isdir(d):
+        return jsonify({"error": "invalid directory"}), 400
+
+    zip_name = os.path.basename(d.rstrip("/")) + ".zip"
+    sidecar  = os.path.join(os.path.dirname(d), zip_name)
+    if os.path.isfile(sidecar) and os.path.getmtime(sidecar) >= _dir_mtime(d):
+        return send_file(sidecar, mimetype="application/zip", as_attachment=True, download_name=zip_name)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(d):
+            for fn in files:
+                full = os.path.join(root, fn)
+                zf.write(full, os.path.relpath(full, d))
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=zip_name)
+
+
+@app.route("/api/scenario-upload-zip", methods=["POST"])
+def scenario_upload_zip():
+    """Import scenario folder(s) (yaml + scripts + firmware) from a single
+    .zip uploaded via the browser. Counterpart of the single-file
+    /api/upload: pywebview's pick_file() only ever handles one file, and
+    browsers have no reliable cross-platform folder upload, so a zip is the
+    simplest way to bring scenario working directories onto a
+    remote/headless Rpi in one request.
+
+    Two zip layouts are supported:
+      - single scenario : yaml (+ scripts/firmware) sit at the zip root
+        -> extracted to scenari/<dir>/ (dir = form field 'dir', or the zip's
+           own filename if not given)
+      - multiple scenarios : the zip root has several subfolders, each one
+        a self-contained scenario (its own .yaml inside)
+        -> each subfolder is extracted as its own scenari/<subfolder>/,
+           'dir' is ignored in this case
+    """
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "no file"}), 400
+    if not f.filename.lower().endswith(".zip"):
+        return jsonify({"ok": False, "error": "expected a .zip archive"}), 400
+
+    base = os.path.abspath(request.form.get("base", SCENARI_DIR))
+    tmp_zip = os.path.join(UPLOAD_DIR, secure_filename(f.filename))
+    f.save(tmp_zip)
+    try:
+        with zipfile.ZipFile(tmp_zip) as zf:
+            names = [n for n in zf.namelist() if not n.endswith("/")]
+            if not names:
+                return jsonify({"ok": False, "error": "empty archive"}), 400
+
+            root_has_yaml = any(
+                "/" not in n and n.lower().endswith((".yaml", ".yml")) for n in names
+            )
+
+            if root_has_yaml:
+                # ── single scenario: everything at the zip root ──
+                dir_name = re.sub(r"[^a-zA-Z0-9_\-. ]", "", request.form.get("dir", "")).strip()
+                if not dir_name:
+                    dir_name = os.path.splitext(secure_filename(f.filename))[0]
+                dest_dir = os.path.abspath(os.path.join(base, dir_name))
+                if not dest_dir.startswith(base):
+                    return jsonify({"ok": False, "error": "invalid path"}), 400
+                os.makedirs(dest_dir, exist_ok=True)
+                for member in names:
+                    member_path = os.path.abspath(os.path.join(dest_dir, member))
+                    if not member_path.startswith(dest_dir):
+                        return jsonify({"ok": False, "error": f"unsafe path in zip: {member}"}), 400
+                    zf.extract(member, dest_dir)
+                _sync_scenario_zip(dest_dir)
+                yaml_files = sorted(fn for fn in os.listdir(dest_dir) if fn.endswith((".yaml", ".yml")))
+                imported = [{"dir": dest_dir, "yaml": yaml_files[0] if yaml_files else None}]
+            else:
+                # ── multiple scenarios: one subfolder per scenario ──
+                top_dirs = sorted({n.split("/", 1)[0] for n in names if "/" in n})
+                if not top_dirs:
+                    return jsonify({"ok": False, "error": "no .yaml found in archive"}), 400
+                imported = []
+                for top in top_dirs:
+                    dest_dir = os.path.abspath(os.path.join(base, re.sub(r"[^a-zA-Z0-9_\-. ]", "", top)))
+                    if not dest_dir.startswith(base):
+                        return jsonify({"ok": False, "error": f"invalid path: {top}"}), 400
+                    os.makedirs(dest_dir, exist_ok=True)
+                    for member in names:
+                        if not (member == top or member.startswith(top + "/")):
+                            continue
+                        rel = member[len(top) + 1:]
+                        if not rel:
+                            continue
+                        member_path = os.path.abspath(os.path.join(dest_dir, rel))
+                        if not member_path.startswith(dest_dir):
+                            return jsonify({"ok": False, "error": f"unsafe path in zip: {member}"}), 400
+                        os.makedirs(os.path.dirname(member_path), exist_ok=True)
+                        with zf.open(member) as src, open(member_path, "wb") as out:
+                            shutil.copyfileobj(src, out)
+                    _sync_scenario_zip(dest_dir)
+                    yaml_files = sorted(fn for fn in os.listdir(dest_dir) if fn.endswith((".yaml", ".yml")))
+                    imported.append({"dir": dest_dir, "yaml": yaml_files[0] if yaml_files else None})
+
+        # Back-compat single-scenario shape (dir/yaml at top level) plus the
+        # new 'imported' list every caller should switch to.
+        return jsonify({"ok": True, "imported": imported, **imported[0]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        try:
+            os.remove(tmp_zip)
+        except OSError:
+            pass
 
 
 # ============================================================
