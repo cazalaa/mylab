@@ -2526,12 +2526,19 @@ class Board:
 
         if self.open_terminal_flag:
             def _open():
-                url = f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}?from_run=1&run_id={self.run_id}"
+                path = f"/terminal/{self.serial}?from_run=1&run_id={self.run_id}"
                 if HEADLESS:
-                    # No native window in headless mode — surface the URL
-                    # instead of crashing on webview.create_window(None...).
-                    print(f"[RUN] open_terminal requested for {self.serial} (headless) -> {url}")
+                    # No native window in headless mode — surface a clickable
+                    # link in the run panel instead of crashing on
+                    # webview.create_window(None...). Relative URL: the
+                    # browser resolves it against the Rpi it's already
+                    # connected to, not this process's own loopback address.
+                    print(f"[RUN] open_terminal requested for {self.serial} (headless) -> {path}")
+                    socketio.emit("run_terminal_ready",
+                                  {"serial": self.serial, "url": path},
+                                  room=f"run_{self.run_id}")
                     return
+                url = f"http://127.0.0.1:{WEB_PORT}{path}"
                 win = webview.create_window(
                     f"{self.serial} — Terminal", url,
                     width=820, height=620, resizable=True)
@@ -2553,11 +2560,14 @@ class Board:
             socketio.emit("terminal_select_view", {"view": v, "room": room}, room=room)
             return
         def _open():
-            url = (f"http://127.0.0.1:{WEB_PORT}/terminal/{self.serial}"
-                   f"?from_run=1&run_id={self.run_id}&view={v}")
+            path = f"/terminal/{self.serial}?from_run=1&run_id={self.run_id}&view={v}"
             if HEADLESS:
-                print(f"[RUN] show_terminal requested for {self.serial} (headless) -> {url}")
+                print(f"[RUN] show_terminal requested for {self.serial} (headless) -> {path}")
+                socketio.emit("run_terminal_ready",
+                              {"serial": self.serial, "url": path},
+                              room=f"run_{self.run_id}")
                 return
+            url = f"http://127.0.0.1:{WEB_PORT}{path}"
             win = webview.create_window(
                 f"{self.serial} — Terminal", url,
                 width=820, height=620, resizable=True)

@@ -235,6 +235,16 @@ function openRunPanel(run_id) {
         if (nameEl) nameEl.innerText = nickname;
     });
 
+    sc.on("run_terminal_ready", ({ serial, url }) => {
+        // Headless mode: no native window can open for open_terminal/
+        // show_terminal, so the backend sends the terminal URL here instead —
+        // surface it as a clickable link on that board's card.
+        const msgEl = document.getElementById(`msg_${serial}`);
+        if (msgEl) {
+            msgEl.innerHTML = `<a href="${esc(url)}" target="_blank" style="color:#185FA5;text-decoration:underline;">Open Terminal ↗</a>`;
+        }
+    });
+
     sc.on("run_done", ({ run_id: rid, status }) => {
         if (rid !== run_id) return;
         if (badge) { badge.innerText = status || "done"; }
@@ -267,6 +277,7 @@ function closeRunPanel() {
     sc.off("run_board_status");
     sc.off("run_output");
     sc.off("run_board_nickname");
+    sc.off("run_terminal_ready");
     sc.off("run_done");
     sc.off("run_stopped");
 }
