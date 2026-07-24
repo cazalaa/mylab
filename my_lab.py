@@ -160,6 +160,48 @@ def _adapters_compat_cached():
     return out
 
 
+def _adapters_compat_for_run(boards):
+    """Like _adapters_compat(), but only enriches (board-id probe, a real
+    round-trip to the adapter) the adapters this specific run actually
+    needs: explicit serial/IP connections, plus — only if some board
+    auto-picks by board type — the usb pool. Enriching every adapter on
+    the network before every run was slow, and contended the same
+    J-Link/USB resources the run is about to use for real flashing."""
+    raw = [a for a in pyc_list_adapters() if a.get("serial")]
+
+    explicit = set()
+    need_usb_boardid = False
+    for b in boards:
+        conn = str(b.get("connection", b.get("jlink_name_or_ip", "usb"))).strip()
+        if conn.lower() in ("usb", "none", "") or _is_loopback_host(conn):
+            if str(b.get("board", "")).strip():
+                need_usb_boardid = True
+        else:
+            explicit.add(conn)
+
+    def wants_enrich(a):
+        if a["serial"] in explicit or (a.get("ip") and a["ip"] in explicit):
+            return True
+        if need_usb_boardid and a.get("connectivity", "usb") == "usb":
+            return True
+        return False
+
+    out = []
+    for a in raw:
+        if wants_enrich(a):
+            bid = _board_id_from_info(a["serial"], a.get("ip"))
+            boards_info = [{"id": bid, "shortLabel": bid, "label": bid, "pn": bid}] if bid else []
+        else:
+            boards_info = []
+        out.append({
+            "serialNumber": a["serial"],
+            "host":         a.get("ip"),
+            "nickname":     a.get("nickname", ""),
+            "boards":       boards_info,
+        })
+    return out
+
+
 def reset_mcu(serial):
     """Reset the target MCU via pycommander `device reset`. Works on USB and IP
     (no admin console needed). Returns (ok, msg). Single source of truth for MCU
@@ -2982,9 +3024,10 @@ def scenario_run():
     if not boards_cfg:
         return jsonify({"ok": False, "error": "No boards defined"}), 400
 
-    # Fetch available adapters (pycommander)
+    # Fetch available adapters (pycommander) — only enrich (board-id probe)
+    # the ones this scenario actually needs, not every adapter on the network.
     try:
-        adapters_data = _adapters_compat()
+        adapters_data = _adapters_compat_for_run(boards_cfg)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Cannot enumerate adapters: {e}"}), 500
 
@@ -3188,6 +3231,7 @@ def scenario_run():
                         ok, flash_log = False, [str(e)]
                     if not ok:
                         failed.add(serial)
+                        print(f"[RUN] Phase 1 flash FAILED serial={serial}: {flash_log}")
                         active_runs[run_id]["boards"][serial] = "error"
                         socketio.emit("run_board_status",
                                       {"serial": serial, "status": "error", "msg": "Flash failed"},
