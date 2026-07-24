@@ -175,7 +175,8 @@ function openRunPanel(run_id) {
                     <span class="sc-run-card-name" id="name_${serial}">${esc(serial)}</span>
                 </div>
                 <span class="sc-run-card-status" id="st_${serial}"></span>
-                <div class="sc-run-card-msg" id="msg_${serial}"></div>`;
+                <div class="sc-run-card-msg" id="msg_${serial}"></div>
+                <div class="sc-run-card-msg" id="term_${serial}"></div>`;
             boards.appendChild(card);
         }
         const color = STATUS_COLOR[status] || "#b5bfc6";
@@ -238,10 +239,12 @@ function openRunPanel(run_id) {
     sc.on("run_terminal_ready", ({ serial, url }) => {
         // Headless mode: no native window can open for open_terminal/
         // show_terminal, so the backend sends the terminal URL here instead —
-        // surface it as a clickable link on that board's card.
-        const msgEl = document.getElementById(`msg_${serial}`);
-        if (msgEl) {
-            msgEl.innerHTML = `<a href="${esc(url)}" target="_blank" style="color:#185FA5;text-decoration:underline;">Open Terminal ↗</a>`;
+        // surface it as a clickable link on that board's card. Uses its own
+        // slot (not msg_${serial}), which run_board_status keeps overwriting
+        // as the script progresses.
+        const termEl = document.getElementById(`term_${serial}`);
+        if (termEl) {
+            termEl.innerHTML = `<a href="${esc(url)}" target="_blank" style="color:#185FA5;text-decoration:underline;">Open Terminal ↗</a>`;
         }
     });
 
