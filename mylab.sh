@@ -23,6 +23,49 @@ err()  { echo -e "${RED}✗ $*${NC}"; exit 1; }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+find_jlink() {
+    command -v JLinkExe 2>/dev/null ||
+        find /opt/SEGGER /usr/local/SEGGER -type f -name JLinkExe \
+            2>/dev/null | head -n1
+}
+
+install_jlink() {
+    local installer="$1"
+    [[ -f "$installer" ]] || err "J-Link installer not found: $installer"
+
+    info "Installing SEGGER J-Link (sudo password may be requested)..."
+    case "$installer" in
+        *.deb)
+            sudo dpkg -i "$installer" || sudo apt-get -f install -y
+            ;;
+        *.tgz|*.tar.gz)
+            local tmp install_script
+            tmp="$(mktemp -d)"
+            tar -xf "$installer" -C "$tmp"
+            install_script="$(find "$tmp" -type f -name install.sh -print -quit)"
+            [[ -n "$install_script" ]] || err "No install.sh found in $installer"
+            sudo bash "$install_script"
+            rm -rf "$tmp"
+            ;;
+        *)
+            err "Supported J-Link installers: .deb, .tgz, .tar.gz"
+            ;;
+    esac
+}
+
+ensure_jlink() {
+    local jlink
+    jlink="$(find_jlink || true)"
+
+    [[ -n "$jlink" ]] || err \
+        "SEGGER J-Link is required. Download its Linux ARM/AArch64 installer, then run: ./mylab.sh --install --jlink-installer /path/to/installer"
+
+    "$jlink" -version >/dev/null 2>&1 ||
+        err "SEGGER J-Link was found but cannot run: $jlink"
+
+    ok "SEGGER J-Link ready: $jlink"
+}
+
 select_python() {
     if have_cmd python3.11; then
         echo "python3.11"
@@ -38,6 +81,11 @@ cmd_install() {
     echo ""
     local SYS_PYTHON
     SYS_PYTHON="$(select_python)"
+
+    if [[ -n "${JLINK_INSTALLER:-}" ]]; then
+        install_jlink "$JLINK_INSTALLER"
+    fi
+    ensure_jlink
 
     if [[ -d "$VENV" ]]; then
         info "Suppression du virtualenv existant pour repartir proprement..."
@@ -134,7 +182,15 @@ cmd_run() {
 
 # ── dispatch ──────────────────────────────────────────────────
 case "${1:-}" in
-    --install)          cmd_install ;;
+    --install)
+        JLINK_INSTALLER=""
+        if [[ "${2:-}" == "--jlink-installer" ]]; then
+            JLINK_INSTALLER="${3:-}"
+        elif [[ "${2:-}" == --jlink-installer=* ]]; then
+            JLINK_INSTALLER="${2#--jlink-installer=}"
+        fi
+        cmd_install
+        ;;
     --clean)            cmd_clean   ;;
     "")                 cmd_run     ;;
     --traces)           cmd_run --traces ;;
