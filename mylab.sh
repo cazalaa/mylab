@@ -149,13 +149,13 @@ cmd_install() {
             pyobjc-framework-WebKit
 
         info "Vérification PyObjC..."
-        "$PYTHON" - <<'PY'
-import objc
-import Foundation
-import AppKit
-import WebKit
-print("PyObjC OK")
-PY
+        "$PYTHON" - <<'PY'        
+        import objc
+        import Foundation
+        import AppKit
+        import WebKit
+        print("PyObjC OK")
+        PY
         ok "Backend macOS prêt"
     elif [[ "${OSTYPE:-}" == "linux"* ]]; then
         info "Linux détecté — utilisation du backend GTK/WebKit système pour pywebview."
