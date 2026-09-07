@@ -99,9 +99,42 @@ cmd_install() {
     info "Mise à jour de pip/setuptools/wheel..."
     "$PYTHON" -m pip install --quiet --upgrade pip setuptools wheel
 
+    info "Installing required Ubuntu runtime libraries..."
+    sudo apt-get update
+    sudo apt-get install -y \
+        ca-certificates \
+        libpcre2-16-0 \
+        libusb-1.0-0 \
+        libudev1
+    ok "Ubuntu runtime libraries ready"
+
     info "Installation des dépendances Python..."
     "$PYTHON" -m pip install --quiet --upgrade -r "$SCRIPT_DIR/requirements.txt"
     ok "Dépendances installées"
+
+    if ! command -v JLinkExe >/dev/null 2>&1; then
+        err "SEGGER J-Link is missing. Install the Linux ARM64 J-Link Software Pack, then rerun ./mylab.sh --install"
+    fi
+
+    JLinkExe -version >/dev/null ||
+        err "SEGGER J-Link is installed but cannot load its shared library"
+
+    if [[ -f /opt/SEGGER/JLink/99-jlink.rules ]]; then
+        sudo install -m 644 /opt/SEGGER/JLink/99-jlink.rules \
+            /etc/udev/rules.d/99-jlink.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger
+    fi
+    
+    "$PYTHON" - <<'PY'
+    from pycommander_cli import Commander
+    
+    commander = Commander()
+    usb = commander.listAvailableAdapters(list_usb_adapters=True)
+    net = commander.listAvailableAdapters(list_network_adapters=True)
+    print(f"PyCommander OK — USB: {len(usb)}, network: {len(net)}")
+    PY
+    ok "PyCommander USB and network discovery verified"
 
     # Backend GUI pour pywebview.
     # Le dashboard reste HTML/CSS/JS/Plotly; ces paquets servent seulement
