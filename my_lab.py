@@ -314,14 +314,14 @@ def _find_usb_tty(serial_number):
 IP_VCOM_PORT = int(config.get("server", "ip_vcom_port", fallback="4901"))
 
 try:
-    from pycommander import Commander as _PycCommander
+    from pycommander_cli import Commander as _PycCommander
     _PYC_OK = True
 except Exception as _pyc_e:           # pragma: no cover
     _PYC_OK = False
     print(f"[WARN] pycommander not available: {_pyc_e}")
 
 try:
-    from pycommander import Adapter as _PycAdapter
+    from pycommander_cli import Adapter as _PycAdapter
 except Exception as _pyc_ad_e:        # pragma: no cover
     _PycAdapter = None
     print(f"[WARN] pycommander Adapter not available: {_pyc_ad_e}")
